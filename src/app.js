@@ -1,9 +1,15 @@
 const express = require('express');
 const cors = require('cors');
+const { initSchema } = require('./db/database');
+const { seed } = require('./db/seed');
 
 const bannerRoutes = require('./routes/banners');
 const categoryRoutes = require('./routes/categories');
 const productRoutes = require('./routes/products');
+
+// 初始化数据库
+initSchema();
+seed();
 
 const app = express();
 

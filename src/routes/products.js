@@ -1,65 +1,124 @@
 const express = require('express');
 const router = express.Router();
-const { products } = require('../data/products');
+const { getDb } = require('../db/database');
 
-// 辅助：按分类分组
-function groupByCategory() {
-  const map = {};
-  products.forEach(p => {
-    if (!map[p.categoryId]) map[p.categoryId] = [];
-    map[p.categoryId].push(p);
-  });
-  return map;
+function ok(res, data) {
+  res.json({ success: true, data });
+}
+function fail(res, msg, status = 400) {
+  res.status(status).json({ success: false, error: msg });
 }
 
-// GET /api/products - 获取所有产品
+// 辅助：行转产品对象（tags 是 JSON 字符串，转回数组）
+function rowToProduct(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    tags: row.tags ? JSON.parse(row.tags) : [],
+  };
+}
+
+// GET /api/products — 所有产品
 router.get('/', (req, res) => {
-  res.json({ success: true, data: products });
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM products ORDER BY categoryId, id').all();
+  ok(res, rows.map(rowToProduct));
 });
 
-// GET /api/products/search?q=xxx - 搜索产品
+// GET /api/products/search?q=xxx
 router.get('/search', (req, res) => {
-  const q = (req.query.q || '').toLowerCase().trim();
-  if (!q) {
-    return res.json({ success: true, data: [] });
-  }
+  const q = (req.query.q || '').trim();
+  if (!q) return ok(res, []);
 
-  const results = products.filter(p =>
-    p.name.includes(q) ||
-    (p.description && p.description.includes(q)) ||
-    (p.tags && p.tags.some(t => t.includes(q)))
-  );
-
-  res.json({ success: true, data: results });
+  const db = getDb();
+  const like = `%${q}%`;
+  const rows = db.prepare(
+    'SELECT * FROM products WHERE name LIKE ? OR description LIKE ? ORDER BY id'
+  ).all(like, like);
+  ok(res, rows.map(rowToProduct));
 });
 
-// GET /api/products/popular - 获取热门产品
+// GET /api/products/popular
 router.get('/popular', (req, res) => {
-  const popular = products.filter(p =>
-    ['welfare_1', 'tea_1', 'tea_2', 'herbs_1', 'health_1'].includes(p.id)
-  );
-  res.json({ success: true, data: popular });
+  const db = getDb();
+  const rows = db.prepare(
+    "SELECT * FROM products WHERE id IN ('welfare_1','tea_1','tea_2','herbs_1','health_1')"
+  ).all();
+  ok(res, rows.map(rowToProduct));
 });
 
-// GET /api/products/category/:categoryId - 按分类获取产品
+// GET /api/products/category/:categoryId
 router.get('/category/:categoryId', (req, res) => {
-  const result = products.filter(p => p.categoryId === req.params.categoryId);
-  res.json({ success: true, data: result });
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM products WHERE categoryId = ? ORDER BY id').all(req.params.categoryId);
+  ok(res, rows.map(rowToProduct));
 });
 
-// GET /api/products/grouped - 按分类分组的产品（首页用）
+// GET /api/products/grouped — 按分类分组
 router.get('/grouped', (req, res) => {
-  const grouped = groupByCategory();
-  res.json({ success: true, data: grouped });
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM products ORDER BY categoryId, id').all();
+  const grouped = {};
+  for (const r of rows) {
+    const p = rowToProduct(r);
+    if (!grouped[p.categoryId]) grouped[p.categoryId] = [];
+    grouped[p.categoryId].push(p);
+  }
+  ok(res, grouped);
 });
 
-// GET /api/products/:id - 获取单个产品
+// GET /api/products/:id
 router.get('/:id', (req, res) => {
-  const product = products.find(p => p.id === req.params.id);
-  if (!product) {
-    return res.status(404).json({ success: false, error: '商品不存在' });
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!row) return fail(res, '商品不存在', 404);
+  ok(res, rowToProduct(row));
+});
+
+// POST /api/products — 新增商品
+router.post('/', (req, res) => {
+  const db = getDb();
+  const { id, name, image, originalPrice, discountedPrice, categoryId, description, stock, tags } = req.body;
+  if (!id || !name || !image || originalPrice === undefined || !categoryId) {
+    return fail(res, 'id, name, image, originalPrice, categoryId 为必填');
   }
-  res.json({ success: true, data: product });
+  db.prepare(
+    'INSERT INTO products (id, name, image, originalPrice, discountedPrice, categoryId, description, stock, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(
+    id, name, image, originalPrice, discountedPrice || null,
+    categoryId, description || '', stock || 0,
+    JSON.stringify(tags || [])
+  );
+  ok(res, { id });
+});
+
+// PUT /api/products/:id — 更新商品
+router.put('/:id', (req, res) => {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!existing) return fail(res, '商品不存在', 404);
+
+  const { name, image, originalPrice, discountedPrice, categoryId, description, stock, tags } = req.body;
+  db.prepare(
+    'UPDATE products SET name=?, image=?, originalPrice=?, discountedPrice=?, categoryId=?, description=?, stock=?, tags=?, updatedAt=datetime(\'now\') WHERE id=?'
+  ).run(
+    name ?? existing.name, image ?? existing.image,
+    originalPrice ?? existing.originalPrice,
+    discountedPrice !== undefined ? discountedPrice : existing.discountedPrice,
+    categoryId ?? existing.categoryId, description ?? existing.description,
+    stock ?? existing.stock,
+    tags ? JSON.stringify(tags) : existing.tags,
+    req.params.id
+  );
+  ok(res, { id: req.params.id });
+});
+
+// DELETE /api/products/:id
+router.delete('/:id', (req, res) => {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) return fail(res, '商品不存在', 404);
+  ok(res, { deleted: req.params.id });
 });
 
 module.exports = router;
