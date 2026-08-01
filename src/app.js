@@ -6,6 +6,7 @@ const { seed } = require('./db/seed');
 const bannerRoutes = require('./routes/banners');
 const categoryRoutes = require('./routes/categories');
 const productRoutes = require('./routes/products');
+const uploadRoutes = require('./routes/upload');
 
 // 初始化数据库
 initSchema();
@@ -33,6 +34,7 @@ app.use((req, res, next) => {
 app.use('/api/banners', bannerRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // 健康检查
 app.get('/api/health', (req, res) => {
