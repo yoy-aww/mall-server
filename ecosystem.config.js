@@ -9,8 +9,8 @@ module.exports = {
       // 七牛云配置 — 填入你的实际值
       QINIU_AK: '',
       QINIU_SK: '',
-      QINIU_BUCKET: '',
-      QINIU_DOMAIN: '',
+      QINIU_BUCKET: 'yoyac',
+      QINIU_DOMAIN: 'http://tiyycecb8.hn-bkt.clouddn.com',
     },
     // 日志配置
     log_date_format: 'YYYY-MM-DD HH:mm:ss',
