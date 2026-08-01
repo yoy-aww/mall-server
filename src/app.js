@@ -1,7 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const { initSchema } = require('./db/database');
-const { seed } = require('./db/seed');
 
 // 加载 .env 配置（在路由加载前，确保环境变量生效）
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
@@ -11,9 +9,7 @@ const categoryRoutes = require('./routes/categories');
 const productRoutes = require('./routes/products');
 const uploadRoutes = require('./routes/upload');
 
-// 初始化数据库
-initSchema();
-seed();
+// DB 初始化由 index.js 统一负责，避免重复
 
 const app = express();
 
