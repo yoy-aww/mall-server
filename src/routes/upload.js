@@ -4,8 +4,8 @@ const router = express.Router();
 // ==================== 七牛云配置 ====================
 // 从环境变量读取，避免硬编码密钥
 // 配置方式：在服务器上 export QINIU_AK / QINIU_SK，或写入 .env 文件
-const QINIU_AK = process.env.QINIU_AK || '';
-const QINIU_SK = process.env.QINIU_SK || '';
+const QINIU_AK = process.env.QINIU_AK || 'BAQQu2mFzJf0VasdZLOfDaB4UAMoe_nMmHEbY8LY';
+const QINIU_SK = process.env.QINIU_SK || '_psf8jJ7ZS3Q6L6q9z7WGX3we03TdAXcJbUnpPF1';
 const QINIU_BUCKET = process.env.QINIU_BUCKET || 'tiyycecb8';
 const QINIU_DOMAIN = process.env.QINIU_DOMAIN || 'http://tiyycecb8.hn-bkt.clouddn.com';
 

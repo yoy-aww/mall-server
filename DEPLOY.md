@@ -130,6 +130,28 @@ ssh -T git@github.com
 mkdir -p /var/www/mall
 ```
 
+### 7. 配置七牛云密钥（让图片上传功能可用）
+
+```bash
+# 复制配置文件模板
+cd /var/www/mall/mall-server
+cp .env.example .env
+
+# 编辑 .env 文件，填入七牛云的 AccessKey 和 SecretKey
+vi .env
+```
+
+`.env` 文件内容：
+
+```bash
+QINIU_AK=你的七牛云AccessKey
+QINIU_SK=你的七牛云SecretKey
+QINIU_BUCKET=tiyycecb8
+QINIU_DOMAIN=http://tiyycecb8.hn-bkt.clouddn.com
+```
+
+> 七牛云密钥获取：https://portal.qiniu.com/user/key
+
 ---
 
 ## 二、首次部署

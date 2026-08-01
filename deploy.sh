@@ -38,7 +38,7 @@ log "安装依赖..."
 npm install --production
 
 log "重启服务..."
-pm2 restart mall-server 2>/dev/null || pm2 start src/index.js --name mall-server
+pm2 restart mall-server 2>/dev/null || pm2 start ecosystem.config.js --only mall-server 2>/dev/null || pm2 start src/index.js --name mall-server
 
 log "✅ mall-server 部署完成"
 
