@@ -3,6 +3,9 @@ const cors = require('cors');
 const { initSchema } = require('./db/database');
 const { seed } = require('./db/seed');
 
+// 加载 .env 配置（在路由加载前，确保环境变量生效）
+require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
+
 const bannerRoutes = require('./routes/banners');
 const categoryRoutes = require('./routes/categories');
 const productRoutes = require('./routes/products');

@@ -1,3 +1,7 @@
+// 加载 .env 配置文件（本地开发使用）
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
+
 const app = require('./app');
 const { initSchema } = require('./db/database');
 const { seed } = require('./db/seed');
