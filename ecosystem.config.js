@@ -7,8 +7,8 @@ module.exports = {
       PORT: 3000,
       HOST: '0.0.0.0',
       // 七牛云配置 — 填入你的实际值
-      QINIU_AK: '',
-      QINIU_SK: '',
+      QINIU_AK: 'BAQQu2mFzJf0VasdZLOfDaB4UAMoe_nMmHEbY8LY',
+      QINIU_SK: '_psf8jJ7ZS3Q6L6q9z7WGX3we03TdAXcJbUnpPF1',
       QINIU_BUCKET: 'yoyac',
       QINIU_DOMAIN: 'http://tiyycecb8.hn-bkt.clouddn.com',
     },
