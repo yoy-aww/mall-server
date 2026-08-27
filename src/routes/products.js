@@ -1,19 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
+const { safeImage } = require('./imageFix');
 
-function ok(res, data) {
-  res.json({ success: true, data });
-}
-function fail(res, msg, status = 400) {
-  res.status(status).json({ success: false, error: msg });
-}
+function ok(res, data) { res.json({ success: true, data }); }
+function fail(res, msg, status = 400) { res.status(status).json({ success: false, error: msg }); }
 
-// 辅助：行转产品对象（tags 是 JSON 字符串，转回数组）
+// 辅助：行转产品对象
 function rowToProduct(row) {
   if (!row) return null;
   return {
     ...row,
+    image: safeImage(row.image),
     tags: row.tags ? JSON.parse(row.tags) : [],
   };
 }

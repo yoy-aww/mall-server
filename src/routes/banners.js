@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
+const { safeImage } = require('./imageFix');
 
 // 工具：包装返回格式
 function ok(res, data) {
@@ -9,6 +10,13 @@ function ok(res, data) {
 function fail(res, msg, status = 400) {
   res.status(status).json({ success: false, error: msg });
 }
+// 修正 banner 行里的失效图外链
+function fixRow(row) {
+  if (!row) return row;
+  row = { ...row };
+  row.image = safeImage(row.image);
+  return row;
+}
 
 // GET /api/banners — 获取所有启用的 Banner
 router.get('/', (req, res) => {
@@ -16,14 +24,14 @@ router.get('/', (req, res) => {
   const rows = db.prepare(
     'SELECT * FROM banners WHERE enabled = 1 ORDER BY sortOrder ASC'
   ).all();
-  ok(res, rows);
+  ok(res, rows.map(fixRow));
 });
 
 // GET /api/banners/all — 获取所有 Banner（含禁用）
 router.get('/all', (req, res) => {
   const db = getDb();
   const rows = db.prepare('SELECT * FROM banners ORDER BY sortOrder ASC').all();
-  ok(res, rows);
+  ok(res, rows.map(fixRow));
 });
 
 // GET /api/banners/:id
@@ -31,7 +39,7 @@ router.get('/:id', (req, res) => {
   const db = getDb();
   const row = db.prepare('SELECT * FROM banners WHERE id = ?').get(req.params.id);
   if (!row) return fail(res, 'Banner 不存在', 404);
-  ok(res, row);
+  ok(res, fixRow(row));
 });
 
 // POST /api/banners — 新增 Banner
