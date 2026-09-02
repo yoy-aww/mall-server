@@ -4,6 +4,7 @@ const cors = require('cors');
 // 加载 .env 配置（在路由加载前，确保环境变量生效）
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
 
+const { router: authRoutes } = require('./routes/auth');
 const bannerRoutes = require('./routes/banners');
 const categoryRoutes = require('./routes/categories');
 const productRoutes = require('./routes/products');
@@ -31,6 +32,7 @@ app.use((req, res, next) => {
 
 // ==================== 路由 ====================
 
+app.use('/api/auth', authRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/banners', bannerRoutes);
 app.use('/api/categories', categoryRoutes);

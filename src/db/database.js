@@ -74,6 +74,19 @@ function initSchema() {
       paidAt TEXT,
       shippedAt TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password TEXT NOT NULL,
+      salt TEXT NOT NULL DEFAULT '',
+      nickname TEXT DEFAULT '',
+      phone TEXT DEFAULT '',
+      role TEXT NOT NULL DEFAULT 'user',
+      avatar TEXT DEFAULT '',
+      createdAt TEXT DEFAULT (datetime('now')),
+      updatedAt TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   console.log('[DB] 表结构初始化完成');

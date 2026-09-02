@@ -71,7 +71,12 @@ function seed() {
       o.createdAt, o.paidAt || '', o.shippedAt || ''
     );
   }
-  console.log(`[Seed] 导入 ${orders.length} 个订单`);
+  console.log('[Seed] 导入 6 个订单');
+
+  // 用户
+  const { ensureAdmin, seedDemoUsers } = require('./seed-users');
+  ensureAdmin();
+  seedDemoUsers();
 
   console.log('[Seed] 种子数据导入完成');
 }
