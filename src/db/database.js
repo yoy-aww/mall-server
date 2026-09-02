@@ -59,6 +59,21 @@ function initSchema() {
       enabled INTEGER DEFAULT 1,
       audioUrl TEXT DEFAULT ''
     );
+
+    CREATE TABLE IF NOT EXISTS orders (
+      id TEXT PRIMARY KEY,
+      userId TEXT DEFAULT '',
+      status TEXT DEFAULT 'pending',
+      items TEXT NOT NULL DEFAULT '[]',
+      totalAmount REAL NOT NULL DEFAULT 0,
+      shippingAddress TEXT DEFAULT '',
+      receiverName TEXT DEFAULT '',
+      receiverPhone TEXT DEFAULT '',
+      remark TEXT DEFAULT '',
+      createdAt TEXT DEFAULT (datetime('now')),
+      paidAt TEXT,
+      shippedAt TEXT
+    );
   `);
 
   console.log('[DB] 表结构初始化完成');

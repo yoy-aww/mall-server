@@ -8,6 +8,7 @@ const { getDb } = require('./database');
 const { products } = require('../data/products');
 const { banners } = require('../data/banners');
 const { categories } = require('../data/categories');
+const { orders } = require('../data/orders');
 
 function seed() {
   const db = getDb();
@@ -58,6 +59,19 @@ function seed() {
     );
   }
   console.log(`[Seed] 导入 ${banners.length} 个 Banner`);
+
+  // 导入订单
+  const insertOrder = db.prepare(
+    'INSERT INTO orders (id, userId, status, items, totalAmount, shippingAddress, receiverName, receiverPhone, remark, createdAt, paidAt, shippedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  );
+  for (const o of orders) {
+    insertOrder.run(
+      o.id, o.userId, o.status, o.items, o.totalAmount,
+      o.shippingAddress, o.receiverName, o.receiverPhone, o.remark || '',
+      o.createdAt, o.paidAt || '', o.shippedAt || ''
+    );
+  }
+  console.log(`[Seed] 导入 ${orders.length} 个订单`);
 
   console.log('[Seed] 种子数据导入完成');
 }

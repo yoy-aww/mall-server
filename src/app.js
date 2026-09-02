@@ -7,6 +7,7 @@ require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env'
 const bannerRoutes = require('./routes/banners');
 const categoryRoutes = require('./routes/categories');
 const productRoutes = require('./routes/products');
+const orderRoutes = require('./routes/orders');
 const uploadRoutes = require('./routes/upload');
 
 // DB 初始化由 index.js 统一负责，避免重复
@@ -30,6 +31,7 @@ app.use((req, res, next) => {
 
 // ==================== 路由 ====================
 
+app.use('/api/orders', orderRoutes);
 app.use('/api/banners', bannerRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/products', productRoutes);
