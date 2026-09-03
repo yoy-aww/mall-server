@@ -17,11 +17,50 @@ function rowToOrder(row) {
   };
 }
 
-// GET /api/orders — 所有订单（按创建时间倒序）
+// GET /api/orders — 所有订单（按创建时间倒序），支持 ?userId=xxx 过滤
 router.get('/', (req, res) => {
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM orders ORDER BY createdAt DESC').all();
+  let rows;
+  if (req.query.userId) {
+    rows = db.prepare('SELECT * FROM orders WHERE userId = ? ORDER BY createdAt DESC').all(req.query.userId);
+  } else {
+    rows = db.prepare('SELECT * FROM orders ORDER BY createdAt DESC').all();
+  }
   ok(res, rows.map(rowToOrder));
+});
+
+// POST /api/orders — 创建订单（普通用户）
+router.post('/', (req, res) => {
+  const db = getDb();
+  const { userId, items, totalAmount, shippingAddress, receiverName, receiverPhone, remark } = req.body;
+  if (!userId || !items || items.length === 0 || !receiverName || !receiverPhone || !shippingAddress) {
+    return fail(res, 'userId, items, 收件人信息为必填');
+  }
+
+  try {
+    db.transaction(() => {
+      // 检查库存
+      for (const item of items) {
+        const product = db.prepare('SELECT name, stock, discountedPrice FROM products WHERE id = ?').get(item.productId);
+        if (!product) {
+          throw new Error(`${item.productName || item.productId} 不存在`);
+        }
+        if (product.stock < item.quantity) {
+          throw new Error(`${product.name} 库存不足（剩 ${product.stock} 件，需要 ${item.quantity} 件）`);
+        }
+        // 扣减库存
+        db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').run(item.quantity, item.productId);
+      }
+
+      const id = 'ORD' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
+      db.prepare(
+        'INSERT INTO orders (id, userId, status, items, totalAmount, shippingAddress, receiverName, receiverPhone, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(id, userId, 'pending', JSON.stringify(items), totalAmount, shippingAddress, receiverName, receiverPhone, remark || '');
+      ok(res, { id });
+    })();
+  } catch (err) {
+    fail(res, err.message || '库存不足');
+  }
 });
 
 // GET /api/orders/:id
@@ -49,9 +88,23 @@ router.put('/:id/status', (req, res) => {
   if (status === 'paid' && !paidAt) paidAt = now;
   if (status === 'shipped' && !shippedAt) shippedAt = now;
 
-  db.prepare(
-    'UPDATE orders SET status=?, paidAt=?, shippedAt=? WHERE id=?'
-  ).run(status, paidAt, shippedAt, req.params.id);
+  // 取消订单 → 恢复库存
+  if (status === 'cancelled') {
+    const items = existing.items ? JSON.parse(existing.items) : [];
+    db.transaction(() => {
+      for (const item of items) {
+        db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(item.quantity, item.productId);
+      }
+      db.prepare('UPDATE orders SET status = ?, paidAt = ?, shippedAt = ? WHERE id = ?')
+        .run(status, paidAt, shippedAt, req.params.id);
+    })();
+    ok(res, { id: req.params.id, status, stockRestored: true });
+    return;
+  }
+
+  // 已下单即扣库存，状态变更不再重复扣减
+  db.prepare('UPDATE orders SET status = ?, paidAt = ?, shippedAt = ? WHERE id = ?')
+    .run(status, paidAt, shippedAt, req.params.id);
   ok(res, { id: req.params.id, status });
 });
 
