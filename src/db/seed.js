@@ -33,15 +33,16 @@ function seed() {
 
   // 导入产品
   const insertProduct = db.prepare(
-    `INSERT INTO products (id, name, image, originalPrice, discountedPrice, categoryId, description, stock, tags)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO products (id, name, image, originalPrice, discountedPrice, categoryId, description, stock, tags, enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   for (const p of products) {
     insertProduct.run(
       p.id, p.name, p.image,
       p.originalPrice, p.discountedPrice || null,
       p.categoryId, p.description || '',
-      p.stock, JSON.stringify(p.tags || [])
+      p.stock, JSON.stringify(p.tags || []),
+      p.enabled !== false ? 1 : 0
     );
   }
   console.log(`[Seed] 导入 ${products.length} 个商品`);

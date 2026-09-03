@@ -3,7 +3,7 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
 const app = require('./app');
-const { initSchema } = require('./db/database');
+const { initSchema, migrate } = require('./db/database');
 const { seed } = require('./db/seed');
 
 const PORT = process.env.PORT || 3000;
@@ -11,6 +11,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 // 初始化数据库
 initSchema();
+migrate();
 seed();
 
 app.listen(PORT, HOST, () => {

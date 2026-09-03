@@ -110,4 +110,18 @@ function initSchema() {
   console.log('[DB] 表结构初始化完成');
 }
 
-module.exports = { getDb, initSchema, DB_PATH };
+/**
+ * 数据库迁移：products 表增加 enabled 字段（商品上下架）
+ */
+function migrate() {
+  const db = getDb();
+  // 检查 products 表是否存在 enabled 列
+  const info = db.prepare("PRAGMA table_info(products)").all();
+  const hasEnabled = info.some(col => col.name === 'enabled');
+  if (!hasEnabled) {
+    db.exec('ALTER TABLE products ADD COLUMN enabled INTEGER DEFAULT 1');
+    console.log('[DB] 已迁移：products 表新增 enabled 字段');
+  }
+}
+
+module.exports = { getDb, initSchema, migrate, DB_PATH };
