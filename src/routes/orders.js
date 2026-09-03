@@ -148,4 +148,17 @@ router.delete('/:id', (req, res) => {
   ok(res, { deleted: req.params.id });
 });
 
+// POST /api/orders/:id/payment — 模拟支付（仅 pending 订单可支付）
+router.post('/:id/payment', (req, res) => {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+  if (!existing) return fail(res, '订单不存在', 404);
+  if (existing.status !== 'pending') return fail(res, `订单状态为 ${existing.status}，不可支付`);
+
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  db.prepare('UPDATE orders SET status = ?, paidAt = ? WHERE id = ?')
+    .run('paid', now, req.params.id);
+  ok(res, { id: req.params.id, status: 'paid', paidAt: now });
+});
+
 module.exports = router;
