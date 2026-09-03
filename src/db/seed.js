@@ -90,6 +90,8 @@ function seed() {
   seedDemoUsers();
   const { seed: seedAddresses } = require('./seed-addresses');
   seedAddresses();
+  const { seed: seedAftersales } = require('./seed-aftersales');
+  seedAftersales();
 
   console.log('[Seed] 种子数据导入完成');
 }

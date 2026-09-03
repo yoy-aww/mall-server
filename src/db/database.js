@@ -120,6 +120,23 @@ function initSchema() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_addresses_user ON addresses(userId);
+
+    CREATE TABLE IF NOT EXISTS aftersales (
+      id TEXT PRIMARY KEY,
+      orderId TEXT NOT NULL,
+      userId TEXT NOT NULL,
+      orderStatus TEXT DEFAULT '',
+      items TEXT DEFAULT '[]',
+      reason TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      images TEXT DEFAULT '[]',
+      status TEXT DEFAULT 'pending',
+      handleReason TEXT DEFAULT '',
+      createdAt TEXT DEFAULT (datetime('now')),
+      handledAt TEXT,
+      FOREIGN KEY (orderId) REFERENCES orders(id),
+      FOREIGN KEY (userId) REFERENCES users(id)
+    );
   `);
 
   console.log('[DB] 表结构初始化完成');

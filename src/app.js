@@ -35,6 +35,7 @@ app.use((req, res, next) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/addresses', require('./routes/addresses'));
+app.use('/api/aftersales', require('./routes/aftersales'));
 app.use('/api/orders', orderRoutes);
 app.use('/api/banners', bannerRoutes);
 app.use('/api/categories', categoryRoutes);
