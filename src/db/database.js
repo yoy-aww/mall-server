@@ -87,6 +87,24 @@ function initSchema() {
       createdAt TEXT DEFAULT (datetime('now')),
       updatedAt TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS reviews (
+      id TEXT PRIMARY KEY,
+      productId TEXT NOT NULL,
+      userId TEXT DEFAULT '',
+      username TEXT DEFAULT '',
+      nickname TEXT DEFAULT '',
+      rating INTEGER NOT NULL DEFAULT 5,
+      content TEXT NOT NULL DEFAULT '',
+      images TEXT DEFAULT '[]',
+      reply TEXT DEFAULT '',
+      replyAt TEXT,
+      visible INTEGER DEFAULT 1,
+      createdAt TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (productId) REFERENCES products(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(productId);
   `);
 
   console.log('[DB] 表结构初始化完成');

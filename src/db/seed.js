@@ -73,6 +73,16 @@ function seed() {
   }
   console.log('[Seed] 导入 6 个订单');
 
+  // 导入评价
+  const { reviews } = require('../data/reviews');
+  const insertReview = db.prepare(
+    'INSERT INTO reviews (id, productId, userId, username, nickname, rating, content, images, reply, replyAt, visible, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  );
+  for (const r of reviews) {
+    insertReview.run(r.id, r.productId, r.userId, r.username, r.nickname, r.rating, r.content, JSON.stringify(r.images || []), r.reply || '', r.replyAt || '', r.visible !== false ? 1 : 0, r.createdAt);
+  }
+  console.log(`[Seed] 导入 ${reviews.length} 条评价`);
+
   // 用户
   const { ensureAdmin, seedDemoUsers } = require('./seed-users');
   ensureAdmin();
