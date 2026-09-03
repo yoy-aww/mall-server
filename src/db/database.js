@@ -105,6 +105,21 @@ function initSchema() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(productId);
+    CREATE TABLE IF NOT EXISTS addresses (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      label TEXT DEFAULT 'default',
+      receiverName TEXT NOT NULL DEFAULT '',
+      receiverPhone TEXT NOT NULL DEFAULT '',
+      province TEXT DEFAULT '',
+      city TEXT DEFAULT '',
+      address TEXT NOT NULL DEFAULT '',
+      isDefault INTEGER DEFAULT 0,
+      createdAt TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (userId) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_addresses_user ON addresses(userId);
   `);
 
   console.log('[DB] 表结构初始化完成');

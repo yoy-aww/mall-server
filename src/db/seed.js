@@ -88,6 +88,8 @@ function seed() {
   const { ensureAdmin, seedDemoUsers } = require('./seed-users');
   ensureAdmin();
   seedDemoUsers();
+  const { seed: seedAddresses } = require('./seed-addresses');
+  seedAddresses();
 
   console.log('[Seed] 种子数据导入完成');
 }

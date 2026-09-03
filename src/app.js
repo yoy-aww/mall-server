@@ -34,6 +34,7 @@ app.use((req, res, next) => {
 // ==================== 路由 ====================
 
 app.use('/api/auth', authRoutes);
+app.use('/api/addresses', require('./routes/addresses'));
 app.use('/api/orders', orderRoutes);
 app.use('/api/banners', bannerRoutes);
 app.use('/api/categories', categoryRoutes);
