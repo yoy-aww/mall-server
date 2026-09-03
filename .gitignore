@@ -1,6 +1,8 @@
 node_modules/
 dist/
 mall.db
+mall.db-wal
+mall.db-shm
 *.db
 .env
 logs/
