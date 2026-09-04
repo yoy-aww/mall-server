@@ -79,3 +79,27 @@ router.put('/all/read', requireAuth, (req, res) => {
 
 module.exports = router;
 module.exports.push = push;
+
+// ========== Admin endpoints ==========
+
+// GET /api/notifications/admin-list — 管理员查看所有通知（含用户信息）
+router.get('/admin-list', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return fail(res, '无权限', 403);
+  const db = getDb();
+  const list = db.prepare(`
+    SELECT n.*, u.username, u.nickname
+    FROM notifications n
+    LEFT JOIN users u ON n.userId = u.id
+    ORDER BY n.createdAt DESC
+  `).all();
+  ok(res, list);
+});
+
+// DELETE /api/notifications/:id — 管理员删除通知
+router.delete('/:id', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return fail(res, '无权限', 403);
+  const db = getDb();
+  const result = db.prepare('DELETE FROM notifications WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) return fail(res, '通知不存在', 404);
+  ok(res, { deleted: req.params.id });
+});
