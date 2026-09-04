@@ -6,6 +6,15 @@ const { safeImage } = require('./imageFix');
 function ok(res, data) { res.json({ success: true, data }); }
 function fail(res, msg, status = 400) { res.status(status).json({ success: false, error: msg }); }
 
+// 分页参数解析：GET ?page=1&limit=20
+// 不传则不分页，保持向后兼容
+function parsePagination(req) {
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
+}
+
 // 行转产品对象（返回全量数据，不下架过滤，供管理后台使用）
 function rowToProduct(row) {
   if (!row) return null;
@@ -17,27 +26,56 @@ function rowToProduct(row) {
   };
 }
 
-// GET /api/products — 所有产品（管理后台：含下架商品）
+// GET /api/products — 所有产品（管理后台：含下架商品），支持 ?admin=1&category=xxx&page=&limit=
 router.get('/', (req, res) => {
   const db = getDb();
-  // 带 ?admin=1 参数时返回全量（含下架）
-  const rows = req.query.admin === '1'
-    ? db.prepare('SELECT * FROM products ORDER BY categoryId, id').all()
-    : db.prepare('SELECT * FROM products WHERE enabled = 1 ORDER BY categoryId, id').all();
-  ok(res, rows.map(rowToProduct));
+  const { page, limit, offset } = parsePagination(req);
+  const usePage = req.query.page || req.query.limit;
+
+  let where = '1=1';
+  const params = [];
+  if (req.query.admin !== '1') where += ' AND enabled = 1';
+  if (req.query.category) { where += ' AND categoryId = ?'; params.push(req.query.category); }
+
+  const total = db.prepare(`SELECT COUNT(*) as total FROM products WHERE ${where}`).get(...params).total;
+  let rows;
+  if (usePage) {
+    rows = db.prepare(`SELECT * FROM products WHERE ${where} ORDER BY categoryId, id LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  } else {
+    rows = db.prepare(`SELECT * FROM products WHERE ${where} ORDER BY categoryId, id`).all(...params);
+  }
+
+  if (usePage) ok(res, { list: rows.map(rowToProduct), total, page, limit });
+  else ok(res, rows.map(rowToProduct));
 });
 
-// GET /api/products/search?q=xxx
+// GET /api/products/search?q=xxx&page=&limit=
 router.get('/search', (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return ok(res, []);
 
   const db = getDb();
+  const { page, limit, offset } = parsePagination(req);
+  const usePage = req.query.page || req.query.limit;
   const like = `%${q}%`;
-  const rows = db.prepare(
-    'SELECT * FROM products WHERE enabled = 1 AND (name LIKE ? OR description LIKE ?) ORDER BY id'
-  ).all(like, like);
-  ok(res, rows.map(rowToProduct));
+
+  const total = db.prepare(
+    'SELECT COUNT(*) as total FROM products WHERE enabled = 1 AND (name LIKE ? OR description LIKE ?)'
+  ).get(like, like).total;
+
+  let rows;
+  if (usePage) {
+    rows = db.prepare(
+      'SELECT * FROM products WHERE enabled = 1 AND (name LIKE ? OR description LIKE ?) ORDER BY id LIMIT ? OFFSET ?'
+    ).all(like, like, limit, offset);
+  } else {
+    rows = db.prepare(
+      'SELECT * FROM products WHERE enabled = 1 AND (name LIKE ? OR description LIKE ?) ORDER BY id'
+    ).all(like, like);
+  }
+
+  if (usePage) ok(res, { list: rows.map(rowToProduct), total, page, limit });
+  else ok(res, rows.map(rowToProduct));
 });
 
 // GET /api/products/popular

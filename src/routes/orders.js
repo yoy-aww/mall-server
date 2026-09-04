@@ -6,6 +6,15 @@ const { verifyToken } = require('../auth');
 function ok(res, data) { res.json({ success: true, data }); }
 function fail(res, msg, status = 400) { res.status(status).json({ success: false, error: msg }); }
 
+// 分页参数解析：GET ?page=1&limit=20
+// 不传则不分页，保持向后兼容
+function parsePagination(req) {
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
+}
+
 function parseAuthUser(req) {
   const auth = req.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
@@ -33,16 +42,32 @@ function rowToOrder(row) {
   };
 }
 
-// GET /api/orders — 所有订单（按创建时间倒序），支持 ?userId=xxx 过滤
+// GET /api/orders — 所有订单（按创建时间倒序），支持 ?userId=xxx&status=xxx&page=&limit=
 router.get('/', (req, res) => {
   const db = getDb();
+  const { page, limit, offset } = parsePagination(req);
+  const usePage = req.query.page || req.query.limit;
+
+  let where = '1=1';
+  const params = [];
+  if (req.query.userId) { where += ' AND userId = ?'; params.push(req.query.userId); }
+  if (req.query.status) { where += ' AND status = ?'; params.push(req.query.status); }
+
+  const countRow = db.prepare(`SELECT COUNT(*) as total FROM orders WHERE ${where}`).get(...params);
+  const total = countRow.total;
+
   let rows;
-  if (req.query.userId) {
-    rows = db.prepare('SELECT * FROM orders WHERE userId = ? ORDER BY createdAt DESC').all(req.query.userId);
+  if (usePage) {
+    rows = db.prepare(`SELECT * FROM orders WHERE ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
   } else {
-    rows = db.prepare('SELECT * FROM orders ORDER BY createdAt DESC').all();
+    rows = db.prepare(`SELECT * FROM orders WHERE ${where} ORDER BY createdAt DESC`).all(...params);
   }
-  ok(res, rows.map(rowToOrder));
+
+  if (usePage) {
+    ok(res, { list: rows.map(rowToOrder), total, page, limit });
+  } else {
+    ok(res, rows.map(rowToOrder));
+  }
 });
 
 // POST /api/orders — 创建订单（普通用户，需登录）

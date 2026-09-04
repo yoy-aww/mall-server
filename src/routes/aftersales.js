@@ -10,6 +10,15 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// 分页参数解析：GET ?page=1&limit=20
+// 不传则不分页，保持向后兼容
+function parsePagination(req) {
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
+}
+
 function rowTo(r) {
   if (!r) return null;
   return {
@@ -21,18 +30,44 @@ function rowTo(r) {
   };
 }
 
-// GET /api/aftersales — 当前用户售后列表
+// GET /api/aftersales — 当前用户售后列表（支持 ?page=&limit=）
 router.get('/', requireAuth, (req, res) => {
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM aftersales WHERE userId = ? ORDER BY createdAt DESC').all(req.user.id);
-  ok(res, rows.map(rowTo));
+  const { page, limit, offset } = parsePagination(req);
+  const usePage = req.query.page || req.query.limit;
+  const total = db.prepare('SELECT COUNT(*) as total FROM aftersales WHERE userId = ?').get(req.user.id).total;
+
+  let rows;
+  if (usePage) {
+    rows = db.prepare('SELECT * FROM aftersales WHERE userId = ? ORDER BY createdAt DESC LIMIT ? OFFSET ?').all(req.user.id, limit, offset);
+  } else {
+    rows = db.prepare('SELECT * FROM aftersales WHERE userId = ? ORDER BY createdAt DESC').all(req.user.id);
+  }
+
+  if (usePage) ok(res, { list: rows.map(rowTo), total, page, limit });
+  else ok(res, rows.map(rowTo));
 });
 
-// GET /api/aftersales/admin — 管理员售后列表
+// GET /api/aftersales/admin — 管理员售后列表（支持 ?page=&limit=&status=）
 router.get('/admin', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM aftersales ORDER BY createdAt DESC').all();
-  ok(res, rows.map(rowTo));
+  const { page, limit, offset } = parsePagination(req);
+  const usePage = req.query.page || req.query.limit;
+
+  let where = '1=1';
+  const params = [];
+  if (req.query.status) { where += ' AND status = ?'; params.push(req.query.status); }
+
+  const total = db.prepare(`SELECT COUNT(*) as total FROM aftersales WHERE ${where}`).get(...params).total;
+  let rows;
+  if (usePage) {
+    rows = db.prepare(`SELECT * FROM aftersales WHERE ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  } else {
+    rows = db.prepare(`SELECT * FROM aftersales WHERE ${where} ORDER BY createdAt DESC`).all(...params);
+  }
+
+  if (usePage) ok(res, { list: rows.map(rowTo), total, page, limit });
+  else ok(res, rows.map(rowTo));
 });
 
 // GET /api/aftersales/:id — 详情（仅本人或管理员）
