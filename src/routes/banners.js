@@ -45,8 +45,9 @@ router.get('/:id', (req, res) => {
 // POST /api/banners — 新增 Banner
 router.post('/', (req, res) => {
   const db = getDb();
-  const { id, title, subtitle, image, link, sortOrder, enabled, audioUrl } = req.body;
-  if (!id || !image) return fail(res, 'id 和 image 为必填');
+  const { title, subtitle, image, link, sortOrder, enabled, audioUrl } = req.body;
+  if (!image) return fail(res, 'image 为必填');
+  const id = 'ban_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
   db.prepare(
     'INSERT INTO banners (id, title, subtitle, image, link, sortOrder, enabled, audioUrl) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(id, title || '', subtitle || '', image, link || '', sortOrder || 0, enabled ? 1 : 0, audioUrl || '');

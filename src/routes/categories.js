@@ -26,8 +26,9 @@ router.get('/:id', (req, res) => {
 // POST /api/categories — 新增分类
 router.post('/', (req, res) => {
   const db = getDb();
-  const { id, name, icon, productCount, sortOrder } = req.body;
-  if (!id || !name) return fail(res, 'id 和 name 为必填');
+  const { name, icon, productCount, sortOrder } = req.body;
+  if (!name) return fail(res, 'name 为必填');
+  const id = 'cat_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
   db.prepare(
     'INSERT INTO categories (id, name, icon, productCount, sortOrder) VALUES (?, ?, ?, ?, ?)'
   ).run(id, name, icon || '', productCount || 0, sortOrder || 0);

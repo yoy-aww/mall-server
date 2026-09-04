@@ -118,10 +118,11 @@ router.get('/:id', (req, res) => {
 // POST /api/products — 新增商品
 router.post('/', (req, res) => {
   const db = getDb();
-  const { id, name, image, originalPrice, discountedPrice, categoryId, description, stock, tags, enabled } = req.body;
-  if (!id || !name || !image || originalPrice === undefined || !categoryId) {
-    return fail(res, 'id, name, image, originalPrice, categoryId 为必填');
+  const { name, image, originalPrice, discountedPrice, categoryId, description, stock, tags, enabled } = req.body;
+  if (!name || !image || originalPrice === undefined || !categoryId) {
+    return fail(res, 'name, image, originalPrice, categoryId 为必填');
   }
+  const id = 'prod_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
   db.prepare(
     'INSERT INTO products (id, name, image, originalPrice, discountedPrice, categoryId, description, stock, tags, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(
