@@ -35,11 +35,12 @@ router.get('/admin', requireAuth, requireAdmin, (req, res) => {
   ok(res, rows.map(rowTo));
 });
 
-// GET /api/aftersales/:id — 详情
-router.get('/:id', (req, res) => {
+// GET /api/aftersales/:id — 详情（仅本人或管理员）
+router.get('/:id', requireAuth, (req, res) => {
   const db = getDb();
   const row = db.prepare('SELECT * FROM aftersales WHERE id = ?').get(req.params.id);
   if (!row) return fail(res, '售后不存在', 404);
+  if (row.userId !== req.user.id && req.user.role !== 'admin') return fail(res, '无权限', 403);
   ok(res, rowTo(row));
 });
 
@@ -47,17 +48,21 @@ router.get('/:id', (req, res) => {
 router.post('/', requireAuth, (req, res) => {
   const db = getDb();
   const { orderId, items, reason, description, images } = req.body;
-  if (!orderId || !items || !reason) return fail(res, '订单号、商品、原因为必填');
+  if (!orderId || !reason) return fail(res, '订单号、原因为必填');
 
   const order = db.prepare('SELECT * FROM orders WHERE id = ? AND userId = ?').get(orderId, req.user.id);
   if (!order) return fail(res, '订单不存在或无权操作', 404);
   const allowed = ['paid', 'shipped', 'delivered', 'completed'];
   if (!allowed.includes(order.status)) return fail(res, `订单状态为 ${order.status}，不可申请售后`);
 
+  // items 未传则从订单自动取（前端传空数组时的兜底）
+  const resolvedItems = (items && items.length > 0) ? items : (order.items ? JSON.parse(order.items) : []);
+  if (resolvedItems.length === 0) return fail(res, '订单中没有商品，无法申请售后');
+
   const id = 'aft_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   db.prepare(
     'INSERT INTO aftersales (id, orderId, userId, orderStatus, items, reason, description, images) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, orderId, req.user.id, order.status, JSON.stringify(items), reason, description || '', JSON.stringify(images || []));
+  ).run(id, orderId, req.user.id, order.status, JSON.stringify(resolvedItems), reason, description || '', JSON.stringify(images || []));
 
   ok(res, { id });
 });
