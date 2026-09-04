@@ -1,6 +1,10 @@
 const crypto = require('crypto');
 
 const SECRET = process.env.AUTH_SECRET || 'mall-default-secret';
+// H12: 生产环境若使用默认密钥则打印警告
+if (!process.env.AUTH_SECRET) {
+  console.warn('[WARN] AUTH_SECRET 未设置，使用默认密钥，生产环境请务必配置！');
+}
 
 /**
  * 生成签名 token
@@ -18,6 +22,14 @@ function signToken(userId, salt) {
 /**
  * 校验 token，返回 userId 或 null
  */
+// H6: timing-safe token compare
+function timingSafeEqual(a, b) {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
 function verifyToken(token) {
   if (!token || typeof token !== 'string') return null;
   const [userId, sig] = token.split(':');
@@ -29,7 +41,7 @@ function verifyToken(token) {
     .createHmac('sha256', SECRET)
     .update(`${userId}:${user.salt}`)
     .digest('hex');
-  return sig === expected ? userId : null;
+  return timingSafeEqual(sig, expected) ? userId : null;
 }
 
 /**

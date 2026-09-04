@@ -113,18 +113,18 @@ router.put('/:id/status', requireAuth, requireAdmin, (req, res) => {
   if (!valid.includes(status)) return fail(res, `无效状态: ${status}`);
 
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  db.prepare('UPDATE aftersales SET status = ?, handleReason = ?, handledAt = ? WHERE id = ?')
-    .run(status, handleReason || '', now, req.params.id);
+  // 审核通过 → 恢复库存 + 更新状态（同一事务）
+  db.transaction(() => {
+    db.prepare('UPDATE aftersales SET status = ?, handleReason = ?, handledAt = ? WHERE id = ?')
+      .run(status, handleReason || '', now, req.params.id);
 
-  // 审核通过 → 恢复库存
-  if (status === 'approved') {
-    const items = existing.items ? JSON.parse(existing.items) : [];
-    db.transaction(() => {
+    if (status === 'approved') {
+      const items = existing.items ? JSON.parse(existing.items) : [];
       for (const item of items) {
         db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(item.quantity, item.productId);
       }
-    })();
-  }
+    }
+  })();
 
   ok(res, { id: req.params.id, status, handledAt: now });
 });

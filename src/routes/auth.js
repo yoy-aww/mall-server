@@ -44,6 +44,8 @@ router.post('/register', (req, res) => {
   if (!username || !password) return fail(res, '用户名和密码为必填');
   if (username.length < 3) return fail(res, '用户名至少 3 位');
   if (password.length < 6) return fail(res, '密码至少 6 位');
+  // H9: phone 格式校验
+  if (phone && !/^1[3-9]\d{9}$/.test(phone)) return fail(res, '手机号格式不正确');
 
   const db = getDb();
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
@@ -143,6 +145,8 @@ router.post('/change-password', requireAuth, (req, res) => {
 
   const db = getDb();
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  // H10: 新密码不能与旧密码相同
+  if (hashPassword(newPassword, user.salt) === user.password) return fail(res, '新密码不能与旧密码相同');
   const expected = hashPassword(oldPassword, user.salt);
   if (expected !== user.password) return fail(res, '旧密码错误');
 
@@ -181,6 +185,11 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
   if (!existing) return fail(res, '用户不存在', 404);
 
   const { username, nickname, phone, role, avatar } = req.body;
+  // H11: username 唯一性校验
+  if (username && username !== existing.username) {
+    const dup = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username, req.params.id);
+    if (dup) return fail(res, '用户名已存在');
+  }
   db.prepare(
     'UPDATE users SET username=?, nickname=?, phone=?, role=?, avatar=?, updatedAt=datetime(\'now\') WHERE id=?'
   ).run(
@@ -211,7 +220,7 @@ router.post('/users/reset-password/:id', requireAuth, requireAdmin, (req, res) =
   ok(res, { message: '密码已重置' });
 });
 
-// DELETE /api/users/:id
+// DELETE /api/users/:id — H8: 级联删除关联数据
 router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
@@ -219,7 +228,13 @@ router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   if (existing.role === 'admin') return fail(res, '不能删除管理员账号', 400);
   if (existing.id === req.user.id) return fail(res, '不能删除自己', 400);
 
-  db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+  db.transaction(() => {
+    db.prepare('DELETE FROM aftersales WHERE userId = ?').run(req.params.id);
+    db.prepare('DELETE FROM reviews WHERE userId = ?').run(req.params.id);
+    db.prepare('DELETE FROM addresses WHERE userId = ?').run(req.params.id);
+    db.prepare('DELETE FROM notifications WHERE userId = ?').run(req.params.id);
+    db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+  })();
   ok(res, { deleted: req.params.id });
 });
 

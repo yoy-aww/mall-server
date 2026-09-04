@@ -73,17 +73,22 @@ router.post('/', requireAuth, (req, res) => {
 
   try {
     db.transaction(() => {
-      // 检查库存
+      // H1: 校验 totalAmount — 从 items 重新计算
+      let expectedTotal = 0;
       for (const item of items) {
-        const product = db.prepare('SELECT name, stock, discountedPrice FROM products WHERE id = ?').get(item.productId);
-        if (!product) {
-          throw new Error(`${item.productName || item.productId} 不存在`);
-        }
+        const product = db.prepare('SELECT name, stock, discountedPrice, originalPrice FROM products WHERE id = ?').get(item.productId);
+        if (!product) throw new Error(`${item.productName || item.productId} 不存在`);
         if (product.stock < item.quantity) {
           throw new Error(`${product.name} 库存不足（剩 ${product.stock} 件，需要 ${item.quantity} 件）`);
         }
-        // 扣减库存
+        const price = product.discountedPrice || product.originalPrice;
+        expectedTotal += price * item.quantity;
         db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').run(item.quantity, item.productId);
+      }
+      // H1: 金额校验 — 允许 ±0.01 误差
+      const submittedTotal = parseFloat(totalAmount);
+      if (isNaN(submittedTotal) || Math.abs(submittedTotal - expectedTotal) > 0.01) {
+        throw new Error('订单金额与商品价格不匹配');
       }
 
       const id = 'ORD' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
@@ -107,7 +112,7 @@ router.get('/:id', requireAuth, (req, res) => {
 });
 
 // PUT /api/orders/:id/status — 更新订单状态（仅管理员）
-router.put('/:id/status', requireAdmin, (req, res) => {
+router.put('/:id/status', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!existing) return fail(res, '订单不存在', 404);
@@ -115,6 +120,16 @@ router.put('/:id/status', requireAdmin, (req, res) => {
   const { status } = req.body;
   const valid = ['pending', 'paid', 'shipped', 'delivered', 'cancelled', 'completed'];
   if (!valid.includes(status)) return fail(res, `无效状态: ${status}`);
+
+  // H5: 状态机 — 只允许向前推进或取消
+  const order = ['pending', 'paid', 'shipped', 'delivered', 'completed'];
+  const fromIdx = order.indexOf(existing.status);
+  const toIdx = order.indexOf(status);
+  if (status !== 'cancelled' && status !== existing.status) {
+    if (fromIdx === -1 || toIdx === -1) return fail(res, `无效状态: ${status}`);
+    if (toIdx < fromIdx) return fail(res, `不能从 ${existing.status} 退回 ${status}`);
+  }
+  if (status === 'cancelled' && existing.status === 'completed') return fail(res, '已完成订单不可取消');
 
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
   let paidAt = existing.paidAt;
@@ -172,15 +187,28 @@ router.put('/:id/status', requireAdmin, (req, res) => {
 });
 
 // PUT /api/orders/:id — 更新订单（如发货信息，仅管理员）
-router.put('/:id', requireAdmin, (req, res) => {
+router.put('/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!existing) return fail(res, '订单不存在', 404);
 
   const { status, receiverName, receiverPhone, shippingAddress, remark } = req.body;
 
+  // H2: status 合法值 + 状态机校验
   let paidAt = existing.paidAt;
   let shippedAt = existing.shippedAt;
+  if (status && status !== existing.status) {
+    const valid = ['pending', 'paid', 'shipped', 'delivered', 'cancelled', 'completed'];
+    if (!valid.includes(status)) return fail(res, `无效状态: ${status}`);
+    const order = ['pending', 'paid', 'shipped', 'delivered', 'completed'];
+    const fromIdx = order.indexOf(existing.status);
+    const toIdx = order.indexOf(status);
+    if (status !== 'cancelled') {
+      if (fromIdx === -1 || toIdx === -1) return fail(res, `无效状态: ${status}`);
+      if (toIdx < fromIdx) return fail(res, `不能从 ${existing.status} 退回 ${status}`);
+    }
+    if (status === 'cancelled' && existing.status === 'completed') return fail(res, '已完成订单不可取消');
+  }
   if (status === 'paid' && !paidAt) {
     paidAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
   }
@@ -204,7 +232,7 @@ router.put('/:id', requireAdmin, (req, res) => {
 });
 
 // DELETE /api/orders/:id（仅管理员）
-router.delete('/:id', requireAdmin, (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const result = db.prepare('DELETE FROM orders WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return fail(res, '订单不存在', 404);
