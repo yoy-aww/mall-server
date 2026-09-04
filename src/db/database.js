@@ -161,6 +161,13 @@ function migrate() {
     db.exec('ALTER TABLE orders ADD COLUMN shippingMethod TEXT DEFAULT "standard"');
     console.log('[DB] 已迁移：orders 表新增 shippingMethod 字段');
   }
+  // 检查 users 表是否存在 disabled 列
+  const usersInfo = db.prepare("PRAGMA table_info(users)").all();
+  const hasDisabled = usersInfo.some(col => col.name === 'disabled');
+  if (!hasDisabled) {
+    db.exec('ALTER TABLE users ADD COLUMN disabled INTEGER DEFAULT 0');
+    console.log('[DB] 已迁移：users 表新增 disabled 字段');
+  }
   // 检查 notifications 表是否存在
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
   const hasNotifications = tables.some(t => t.name === 'notifications');

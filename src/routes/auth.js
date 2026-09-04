@@ -72,7 +72,7 @@ router.post('/login', (req, res) => {
 
   const db = getDb();
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  if (!user) return fail(res, '用户名或密码错误');
+  if (!user || user.disabled) return fail(res, '用户名或密码错误');
 
   const expected = hashPassword(password, user.salt);
   if (expected !== user.password) return fail(res, '用户名或密码错误');
@@ -92,6 +92,44 @@ router.post('/login', (req, res) => {
 // GET /api/auth/me
 router.get('/me', requireAuth, (req, res) => {
   ok(res, req.user);
+});
+
+// POST /api/auth/users — 管理员新增用户
+router.post('/users', requireAuth, requireAdmin, (req, res) => {
+  const { username, password, nickname, phone } = req.body;
+  if (!username || !password) return fail(res, '用户名和密码为必填');
+  if (username.length < 3) return fail(res, '用户名至少 3 位');
+  if (password.length < 6) return fail(res, '密码至少 6 位');
+
+  const db = getDb();
+  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  if (existing) return fail(res, '用户名已存在');
+
+  const salt = generateSalt();
+  const pwHash = hashPassword(password, salt);
+  const id = 'u_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 5);
+
+  db.prepare(
+    'INSERT INTO users (id, username, password, salt, nickname, phone, role, disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, username, pwHash, salt, nickname || '', phone || '', 'user', 0);
+
+  ok(res, { id, username });
+});
+
+// PUT /api/auth/users/:id/status — 管理员禁用/启用账号
+router.put('/users/:id/status', requireAuth, requireAdmin, (req, res) => {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  if (!existing) return fail(res, '用户不存在', 404);
+  if (existing.role === 'admin') return fail(res, '不能禁用管理员账号', 400);
+  if (existing.id === req.user.id) return fail(res, '不能禁用自己', 400);
+
+  const { disabled } = req.body;
+  const val = disabled ? 1 : 0;
+  db.prepare('UPDATE users SET disabled=?, updatedAt=datetime(\'now\') WHERE id=?')
+    .run(val, req.params.id);
+
+  ok(res, { id: req.params.id, disabled: val });
 });
 
 // ============ 密码修改 ============
