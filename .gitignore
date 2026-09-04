@@ -6,3 +6,5 @@ mall.db-shm
 *.db
 .env
 logs/
+server.log
+test.js
