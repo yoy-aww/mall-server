@@ -41,6 +41,7 @@ app.use('/api/banners', bannerRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/upload', uploadRoutes);
 
 // 健康检查

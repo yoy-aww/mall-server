@@ -154,6 +154,24 @@ function migrate() {
     db.exec('ALTER TABLE products ADD COLUMN enabled INTEGER DEFAULT 1');
     console.log('[DB] 已迁移：products 表新增 enabled 字段');
   }
+  // 检查 notifications 表是否存在
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+  const hasNotifications = tables.some(t => t.name === 'notifications');
+  if (!hasNotifications) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        relatedId TEXT,
+        read INTEGER DEFAULT 0,
+        createdAt TEXT NOT NULL
+      )
+    `);
+    console.log('[DB] 已迁移：新增 notifications 表');
+  }
 }
 
 module.exports = { getDb, initSchema, migrate, DB_PATH };

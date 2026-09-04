@@ -105,6 +105,24 @@ router.put('/:id/status', (req, res) => {
   // 已下单即扣库存，状态变更不再重复扣减
   db.prepare('UPDATE orders SET status = ?, paidAt = ?, shippedAt = ? WHERE id = ?')
     .run(status, paidAt, shippedAt, req.params.id);
+
+  // 通知用户（仅关键状态变更）
+  const notifyStatuses = ['paid', 'shipped', 'delivered', 'completed', 'cancelled'];
+  const userNotify = {
+    paid:      { title: '支付成功',       content: `订单 ${req.params.id} 已付款，正在为您准备` },
+    shipped:   { title: '已发货',         content: `订单 ${req.params.id} 已发货，请注意查收` },
+    delivered: { title: '已签收',         content: `订单 ${req.params.id} 已签收` },
+    completed: { title: '已完成',         content: `订单 ${req.params.id} 已完成` },
+    cancelled: { title: '已取消',         content: `订单 ${req.params.id} 已取消` },
+  };
+  if (notifyStatuses.includes(status)) {
+    const n = userNotify[status];
+    const nid = 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+    db.prepare(
+      'INSERT INTO notifications (id, userId, type, title, content, relatedId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(nid, existing.userId, 'order', n.title, n.content, req.params.id, now);
+  }
+
   ok(res, { id: req.params.id, status });
 });
 
