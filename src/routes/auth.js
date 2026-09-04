@@ -56,7 +56,11 @@ router.post('/register', (req, res) => {
     'INSERT INTO users (id, username, password, salt, nickname, phone, role) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).run(id, username, pwHash, salt, nickname || '', phone || '', 'user');
 
-  ok(res, { id, username, role: 'user' });
+  const token = signToken(id, salt);
+  ok(res, {
+    token,
+    user: { id, username, nickname: nickname || '', phone: phone || '', role: 'user' },
+  });
 });
 
 // ============ 登录 ============
