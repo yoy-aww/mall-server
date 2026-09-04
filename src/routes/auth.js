@@ -19,9 +19,10 @@ function requireAuth(req, res, next) {
 
   const db = getDb();
   const user = db.prepare(
-    'SELECT id, username, nickname, phone, role, avatar, createdAt FROM users WHERE id = ?'
+    'SELECT id, username, nickname, phone, role, avatar, createdAt, disabled FROM users WHERE id = ?'
   ).get(userId);
   if (!user) return fail(res, '登录已过期', 401);
+  if (user.disabled) return fail(res, '账号已被禁用', 403);
 
   // 去掉密码和盐
   const { password, salt, ...safeUser } = user;
@@ -222,4 +223,4 @@ router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   ok(res, { deleted: req.params.id });
 });
 
-module.exports = { router, requireAuth };
+module.exports = { router, requireAuth, requireAdmin };

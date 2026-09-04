@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { requireAuth, requireAdmin } = require('./auth');
 
 // 每次请求时读取环境变量（确保 dotenv 生效）
 const getEnv = () => ({
@@ -17,7 +18,7 @@ function fail(res, msg, status = 400) {
 }
 
 // GET /api/upload/config
-router.get('/config', (req, res) => {
+router.get('/config', requireAuth, requireAdmin, (req, res) => {
   const env = getEnv();
   if (!env.domain) return fail(res, '七牛云未配置');
   ok(res, {
@@ -28,7 +29,7 @@ router.get('/config', (req, res) => {
 });
 
 // GET /api/upload/token
-router.get('/token', (req, res) => {
+router.get('/token', requireAuth, requireAdmin, (req, res) => {
   const env = getEnv();
   if (!env.ak || !env.sk || !env.bucket) {
     return fail(res, '七牛云未配置完整，请设置 QINIU_AK、QINIU_SK、QINIU_BUCKET');

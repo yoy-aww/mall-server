@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const { verifyToken } = require('../auth');
+const { requireAuth, requireAdmin } = require('./auth');
 const { push: pushNotification } = require('./notifications');
 
 function ok(res, data) { res.json({ success: true, data }); }
@@ -14,21 +15,6 @@ function parsePagination(req) {
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
   const offset = (page - 1) * limit;
   return { page, limit, offset };
-}
-
-function parseAuthUser(req) {
-  const auth = req.headers.authorization || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!token) return null;
-  const userId = verifyToken(token);
-  if (!userId) return null;
-  const db = getDb();
-  return db.prepare('SELECT * FROM users WHERE id = ?').get(userId) || null;
-}
-function requireAdmin(req, res, next) {
-  const user = parseAuthUser(req);
-  if (!user || user.role !== 'admin') return fail(res, '无权限', 403);
-  next();
 }
 
 // 行 → 订单对象
@@ -44,15 +30,20 @@ function rowToOrder(row) {
 }
 
 // GET /api/orders — 所有订单（按创建时间倒序），支持 ?userId=xxx&status=xxx&page=&limit=
-router.get('/', (req, res) => {
+router.get('/', requireAuth, (req, res) => {
   const db = getDb();
   const { page, limit, offset } = parsePagination(req);
   const usePage = req.query.page || req.query.limit;
 
   let where = '1=1';
   const params = [];
-  if (req.query.userId) { where += ' AND userId = ?'; params.push(req.query.userId); }
-  if (req.query.status) { where += ' AND status = ?'; params.push(req.query.status); }
+  if (req.user.role === 'admin') {
+    if (req.query.userId) { where += ' AND userId = ?'; params.push(req.query.userId); }
+    if (req.query.status) { where += ' AND status = ?'; params.push(req.query.status); }
+  } else {
+    where += ' AND userId = ?'; params.push(req.user.id);
+    if (req.query.status) { where += ' AND status = ?'; params.push(req.query.status); }
+  }
 
   const countRow = db.prepare(`SELECT COUNT(*) as total FROM orders WHERE ${where}`).get(...params);
   const total = countRow.total;
@@ -72,9 +63,8 @@ router.get('/', (req, res) => {
 });
 
 // POST /api/orders — 创建订单（普通用户，需登录）
-router.post('/', (req, res) => {
-  const user = parseAuthUser(req);
-  if (!user) return fail(res, '未登录', 401);
+router.post('/', requireAuth, (req, res) => {
+  const user = req.user;
   const db = getDb();
   const { items, totalAmount, shippingMethod, shippingAddress, receiverName, receiverPhone, remark } = req.body;
   if (!items || items.length === 0 || !receiverName || !receiverPhone || !shippingAddress) {
@@ -108,10 +98,11 @@ router.post('/', (req, res) => {
 });
 
 // GET /api/orders/:id
-router.get('/:id', (req, res) => {
+router.get('/:id', requireAuth, (req, res) => {
   const db = getDb();
   const row = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!row) return fail(res, '订单不存在', 404);
+  if (row.userId !== req.user.id && req.user.role !== 'admin') return fail(res, '无权限', 403);
   ok(res, rowToOrder(row));
 });
 
@@ -221,10 +212,11 @@ router.delete('/:id', requireAdmin, (req, res) => {
 });
 
 // POST /api/orders/:id/payment — 模拟支付（仅 pending 订单可支付）
-router.post('/:id/payment', (req, res) => {
+router.post('/:id/payment', requireAuth, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!existing) return fail(res, '订单不存在', 404);
+  if (existing.userId !== req.user.id && req.user.role !== 'admin') return fail(res, '无权限', 403);
   if (existing.status !== 'pending') return fail(res, `订单状态为 ${existing.status}，不可支付`);
 
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');

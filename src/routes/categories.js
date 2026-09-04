@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
+const { requireAuth, requireAdmin } = require('./auth');
 
 function ok(res, data) { res.json({ success: true, data }); }
 function fail(res, msg, status = 400) { res.status(status).json({ success: false, error: msg }); }
@@ -24,7 +25,7 @@ router.get('/:id', (req, res) => {
 });
 
 // POST /api/categories — 新增分类
-router.post('/', (req, res) => {
+router.post('/', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const { name, icon, productCount, sortOrder } = req.body;
   if (!name) return fail(res, 'name 为必填');
@@ -36,7 +37,7 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/categories/:id — 更新分类
-router.put('/:id', (req, res) => {
+router.put('/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
   if (!existing) return fail(res, '分类不存在', 404);
@@ -53,7 +54,7 @@ router.put('/:id', (req, res) => {
 });
 
 // DELETE /api/categories/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   // 先检查是否有商品引用
   const ref = db.prepare('SELECT COUNT(*) as c FROM products WHERE categoryId = ?').get(req.params.id);

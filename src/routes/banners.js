@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const { safeImage } = require('./imageFix');
+const { requireAuth, requireAdmin } = require('./auth');
 
 // 工具：包装返回格式
 function ok(res, data) {
@@ -43,7 +44,7 @@ router.get('/:id', (req, res) => {
 });
 
 // POST /api/banners — 新增 Banner
-router.post('/', (req, res) => {
+router.post('/', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const { title, subtitle, image, link, sortOrder, enabled, audioUrl } = req.body;
   if (!image) return fail(res, 'image 为必填');
@@ -55,7 +56,7 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/banners/:id — 更新 Banner
-router.put('/:id', (req, res) => {
+router.put('/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM banners WHERE id = ?').get(req.params.id);
   if (!existing) return fail(res, 'Banner 不存在', 404);
@@ -73,7 +74,7 @@ router.put('/:id', (req, res) => {
 });
 
 // DELETE /api/banners/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const result = db.prepare('DELETE FROM banners WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return fail(res, 'Banner 不存在', 404);

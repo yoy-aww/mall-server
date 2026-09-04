@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
+const { requireAuth, requireAdmin } = require('./auth');
 
 // GET /api/stats — 仪表盘统计（管理员）
-router.get('/', (req, res) => {
+router.get('/', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const [products, banners, categories, orders, users, aftersales] = [
     db.prepare('SELECT COUNT(*) AS c FROM products WHERE enabled = 1').get().c,

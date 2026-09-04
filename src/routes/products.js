@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const { safeImage } = require('./imageFix');
+const { requireAuth, requireAdmin } = require('./auth');
 
 function ok(res, data) { res.json({ success: true, data }); }
 function fail(res, msg, status = 400) { res.status(status).json({ success: false, error: msg }); }
@@ -116,7 +117,7 @@ router.get('/:id', (req, res) => {
 });
 
 // POST /api/products — 新增商品
-router.post('/', (req, res) => {
+router.post('/', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const { name, image, originalPrice, discountedPrice, categoryId, description, stock, tags, enabled } = req.body;
   if (!name || !image || originalPrice === undefined || !categoryId) {
@@ -134,7 +135,7 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/products/:id — 更新商品
-router.put('/:id', (req, res) => {
+router.put('/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!existing) return fail(res, '商品不存在', 404);
@@ -156,7 +157,7 @@ router.put('/:id', (req, res) => {
 });
 
 // DELETE /api/products/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const result = db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return fail(res, '商品不存在', 404);
