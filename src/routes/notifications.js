@@ -2,9 +2,56 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const { requireAuth } = require('./auth');
+const { verifyToken } = require('../auth');
 
 function ok(res, data) { res.json({ success: true, data }); }
 function fail(res, msg, status = 400) { res.status(status).json({ success: false, error: msg }); }
+
+// ========== SSE 连接管理 ==========
+
+/** @type {Map<string, Set<import('http').ServerResponse>>} */
+const clients = new Map(); // userId -> Set<res>
+
+// GET /api/notifications/stream — SSE 实时推送
+// EventSource 不支持自定义 header，所以用 query 参数传 auth
+router.get('/stream', (req, res) => {
+  const token = req.query.auth;
+  if (!token) return fail(res, '未登录', 401);
+  const userId = verifyToken(token);
+  if (!userId) return fail(res, '登录已过期', 401);
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+  res.write(`data: ${JSON.stringify({ type: 'connected', userId })}\n\n`);
+
+  if (!clients.has(userId)) clients.set(userId, new Set());
+  clients.get(userId).add(res);
+
+  req.on('close', () => {
+    const set = clients.get(userId);
+    if (set) {
+      set.delete(res);
+      if (set.size === 0) clients.delete(userId);
+    }
+  });
+});
+
+/**
+ * 向指定用户推送通知事件（从 orders.js 等路由调用）
+ * @param {string} userId
+ * @param {object} notification 通知对象
+ */
+function push(userId, notification) {
+  const set = clients.get(userId);
+  if (!set || set.size === 0) return;
+  const msg = `data: ${JSON.stringify({ type: 'notification', notification })}\n\n`;
+  for (const res of set) {
+    try { res.write(msg); } catch { /* 写入失败忽略，下次 close 清理 */ }
+  }
+}
 
 // GET /api/notifications — 当前用户的消息列表（含未读计数）
 router.get('/', requireAuth, (req, res) => {
@@ -31,3 +78,4 @@ router.put('/all/read', requireAuth, (req, res) => {
 });
 
 module.exports = router;
+module.exports.push = push;

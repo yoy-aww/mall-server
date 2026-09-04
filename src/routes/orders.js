@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const { verifyToken } = require('../auth');
+const { push: pushNotification } = require('./notifications');
 
 function ok(res, data) { res.json({ success: true, data }); }
 function fail(res, msg, status = 400) { res.status(status).json({ success: false, error: msg }); }
@@ -164,6 +165,16 @@ router.put('/:id/status', requireAdmin, (req, res) => {
     db.prepare(
       'INSERT INTO notifications (id, userId, type, title, content, relatedId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).run(nid, existing.userId, 'order', n.title, n.content, req.params.id, now);
+
+    // 实时推送 SSE（前端已连接的用户立即收到）
+    pushNotification(existing.userId, {
+      id: nid,
+      type: 'order',
+      title: n.title,
+      content: n.content,
+      relatedId: req.params.id,
+      createdAt: now,
+    });
   }
 
   ok(res, { id: req.params.id, status });
