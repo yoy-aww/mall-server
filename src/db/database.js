@@ -154,6 +154,13 @@ function migrate() {
     db.exec('ALTER TABLE products ADD COLUMN enabled INTEGER DEFAULT 1');
     console.log('[DB] 已迁移：products 表新增 enabled 字段');
   }
+  // 检查 orders 表是否存在 shippingMethod 列
+  const ordersInfo = db.prepare("PRAGMA table_info(orders)").all();
+  const hasShipMethod = ordersInfo.some(col => col.name === 'shippingMethod');
+  if (!hasShipMethod) {
+    db.exec('ALTER TABLE orders ADD COLUMN shippingMethod TEXT DEFAULT "standard"');
+    console.log('[DB] 已迁移：orders 表新增 shippingMethod 字段');
+  }
   // 检查 notifications 表是否存在
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
   const hasNotifications = tables.some(t => t.name === 'notifications');

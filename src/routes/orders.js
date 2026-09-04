@@ -76,7 +76,7 @@ router.post('/', (req, res) => {
   const user = parseAuthUser(req);
   if (!user) return fail(res, '未登录', 401);
   const db = getDb();
-  const { items, totalAmount, shippingAddress, receiverName, receiverPhone, remark } = req.body;
+  const { items, totalAmount, shippingMethod, shippingAddress, receiverName, receiverPhone, remark } = req.body;
   if (!items || items.length === 0 || !receiverName || !receiverPhone || !shippingAddress) {
     return fail(res, 'items, 收件人信息为必填');
   }
@@ -98,8 +98,8 @@ router.post('/', (req, res) => {
 
       const id = 'ORD' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
       db.prepare(
-        'INSERT INTO orders (id, userId, status, items, totalAmount, shippingAddress, receiverName, receiverPhone, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run(id, user.id, 'pending', JSON.stringify(items), totalAmount, shippingAddress, receiverName, receiverPhone, remark || '');
+        'INSERT INTO orders (id, userId, status, items, totalAmount, shippingMethod, shippingAddress, receiverName, receiverPhone, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(id, user.id, 'pending', JSON.stringify(items), totalAmount, shippingMethod || 'standard', shippingAddress, receiverName, receiverPhone, remark || '');
       ok(res, { id });
     })();
   } catch (err) {
