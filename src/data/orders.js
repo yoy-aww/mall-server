@@ -2,7 +2,7 @@
 const orders = [
   {
     id: 'ORD20260801001',
-    userId: 'u_001',
+    userId: 'u_zhangsan',
     status: 'completed',
     items: JSON.stringify([
       { productId: 'tea_1', productName: '网红柠檬蜂蜜茶', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/tea_background_7.jpg', price: 39, quantity: 2 },
@@ -18,7 +18,7 @@ const orders = [
   },
   {
     id: 'ORD20260805002',
-    userId: 'u_002',
+    userId: 'u_lisi',
     status: 'shipped',
     items: JSON.stringify([
       { productId: 'herbs_1', productName: '野生人参片', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/herb_ingredients_3.jpg', price: 488, quantity: 1 },
@@ -35,7 +35,7 @@ const orders = [
   },
   {
     id: 'ORD20260810003',
-    userId: 'u_003',
+    userId: 'u_wangwu',
     status: 'paid',
     items: JSON.stringify([
       { productId: 'activity_1', productName: '限时秒杀养生套装', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/gift_box_0.jpg', price: 199, quantity: 1 },
@@ -51,7 +51,7 @@ const orders = [
   },
   {
     id: 'ORD20260815004',
-    userId: 'u_001',
+    userId: 'u_zhangsan',
     status: 'pending',
     items: JSON.stringify([
       { productId: 'health_1', productName: '灵芝孢子粉胶囊', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/product_jars_7.jpg', price: 298, quantity: 1 },
@@ -68,7 +68,7 @@ const orders = [
   },
   {
     id: 'ORD20260818005',
-    userId: 'u_004',
+    userId: 'u_lisi',
     status: 'cancelled',
     items: JSON.stringify([
       { productId: 'tea_2', productName: '玫瑰花茶礼盒', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/gift_box_5.jpg', price: 128, quantity: 1 },
@@ -84,7 +84,7 @@ const orders = [
   },
   {
     id: 'ORD20260820006',
-    userId: 'u_005',
+    userId: 'u_wangwu',
     status: 'delivered',
     items: JSON.stringify([
       { productId: 'supplements_1', productName: '复合维生素片', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/product_jars_8.jpg', price: 98, quantity: 2 },

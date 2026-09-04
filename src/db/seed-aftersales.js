@@ -12,7 +12,7 @@ function seed() {
     for (const o of orders) {
       if (o.userId === uid && statuses.includes(o.status)) return o;
     }
-    return orders[0];
+    throw new Error(`未找到 userId=${uid} 且 status 在 [${statuses}] 的订单，请检查 seed 数据`);
   };
 
   const o1 = findOrder('u_zhangsan', ['paid','shipped','delivered','completed','pending']);
