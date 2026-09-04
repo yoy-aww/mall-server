@@ -35,7 +35,7 @@ router.get('/', (req, res) => {
   let where = '1=1';
   const params = [];
   if (req.query.admin !== '1') where += ' AND enabled = 1';
-  if (req.query.category) { where += ' AND categoryId = ?'; params.push(req.query.category); }
+  if (req.query.category && req.query.category !== 'undefined' && req.query.category !== 'null') { where += ' AND categoryId = ?'; params.push(req.query.category); }
 
   const total = db.prepare(`SELECT COUNT(*) as total FROM products WHERE ${where}`).get(...params).total;
   let rows;
