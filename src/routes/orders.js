@@ -26,7 +26,69 @@ function rowToOrder(row) {
     paidAt: row.paidAt || undefined,
     shippedAt: row.shippedAt || undefined,
     remark: row.remark || undefined,
+    shippingFee: row.shippingFee || 0,
   };
+}
+
+// ==================== 运费规则（后端作为唯一计价源） ====================
+// 规则：
+//   - 顺丰特快 sfx: 固定 15，无免邮门槛
+//   - 标准快递 standard: 商品小计 ≥ 199 免邮，否则 8
+// 新增规则只需改这里 + 同步前端展示文案
+const SHIPPING_RULES = {
+  standard: { fee: 8, freeThreshold: 199 },
+  sfx:      { fee: 15, freeThreshold: Infinity },
+};
+
+/**
+ * 根据商品小计和配送方式算运费
+ * @param {number} subtotal 商品小计（不含运费）
+ * @param {'standard'|'sfx'} method
+ * @returns {{ shippingFee: number, subtotal: number, total: number, free: boolean }}
+ */
+function calculateShippingFee(subtotal, method) {
+  const m = SHIPPING_RULES[method] || SHIPPING_RULES.standard;
+  const free = subtotal >= m.freeThreshold;
+  const shippingFee = free ? 0 : m.fee;
+  const total = subtotal + shippingFee;
+  return { shippingFee, subtotal, total, free };
+}
+
+/**
+ * 从 items + DB 里查到的商品重算商品小计
+ * 返回 [{product, quantity}] 和 subtotal，同时校验商品存在、库存、单价。
+ */
+function resolveItemsFromDb(db, items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('items 不能为空');
+  }
+  const resolved = [];
+  let subtotal = 0;
+  for (const item of items) {
+    if (!item.productId) throw new Error('items 缺少 productId');
+    const qty = Number(item.quantity);
+    if (!Number.isInteger(qty) || qty <= 0) throw new Error(`商品 ${item.productId} 数量非法`);
+
+    const product = db.prepare(
+      'SELECT id, name, stock, discountedPrice, originalPrice FROM products WHERE id = ?'
+    ).get(item.productId);
+    if (!product) throw new Error(`${item.productName || item.productId} 不存在`);
+    if (product.stock < qty) {
+      throw new Error(`${product.name} 库存不足（剩 ${product.stock} 件，需要 ${qty} 件）`);
+    }
+    const price = product.discountedPrice || product.originalPrice;
+    subtotal += price * qty;
+    resolved.push({ productId: product.id, productName: product.name, price, quantity: qty });
+  }
+  return { resolved, subtotal };
+}
+
+// 供预览接口复用：只算不扣库存
+function previewOrderItems(db, items, shippingMethod) {
+  const { resolved, subtotal } = resolveItemsFromDb(db, items);
+  const method = SHIPPING_RULES[shippingMethod] ? shippingMethod : 'standard';
+  const { shippingFee, total, free } = calculateShippingFee(subtotal, method);
+  return { items: resolved, subtotal, shippingFee, total, free, shippingMethod: method };
 }
 
 // GET /api/orders — 所有订单（按创建时间倒序），支持 ?userId=xxx&status=xxx&page=&limit=
@@ -62,41 +124,60 @@ router.get('/', requireAuth, (req, res) => {
   }
 });
 
+// POST /api/orders/preview — 报价（前端展示金额用），不扣库存
+// 请求：{ items: [{productId, quantity}], shippingMethod?: 'standard'|'sfx' }
+// 响应：{ items, subtotal, shippingFee, total, free, shippingMethod }
+router.post('/preview', requireAuth, (req, res) => {
+  const db = getDb();
+  const { items, shippingMethod } = req.body || {};
+  try {
+    const result = previewOrderItems(db, items, shippingMethod);
+    ok(res, result);
+  } catch (err) {
+    fail(res, err.message || '报价失败');
+  }
+});
+
 // POST /api/orders — 创建订单（普通用户，需登录）
+// 金额以服务端计算为准，客户端传入的 totalAmount 仅用于兼容旧版客户端（若不一致以服务端为准）。
 router.post('/', requireAuth, (req, res) => {
   const user = req.user;
   const db = getDb();
-  const { items, totalAmount, shippingMethod, shippingAddress, receiverName, receiverPhone, remark } = req.body;
+  const { items, shippingMethod, shippingAddress, receiverName, receiverPhone, remark } = req.body;
   if (!items || items.length === 0 || !receiverName || !receiverPhone || !shippingAddress) {
     return fail(res, 'items, 收件人信息为必填');
   }
+  if (!SHIPPING_RULES[shippingMethod] && shippingMethod !== undefined) {
+    return fail(res, `无效配送方式: ${shippingMethod}`);
+  }
 
   try {
-    db.transaction(() => {
-      // H1: 校验 totalAmount — 从 items 重新计算
-      let expectedTotal = 0;
-      for (const item of items) {
-        const product = db.prepare('SELECT name, stock, discountedPrice, originalPrice FROM products WHERE id = ?').get(item.productId);
-        if (!product) throw new Error(`${item.productName || item.productId} 不存在`);
-        if (product.stock < item.quantity) {
-          throw new Error(`${product.name} 库存不足（剩 ${product.stock} 件，需要 ${item.quantity} 件）`);
-        }
-        const price = product.discountedPrice || product.originalPrice;
-        expectedTotal += price * item.quantity;
+    const result = db.transaction(() => {
+      const { resolved, subtotal } = resolveItemsFromDb(db, items);
+      const method = SHIPPING_RULES[shippingMethod] ? shippingMethod : 'standard';
+      const { shippingFee, total, free } = calculateShippingFee(subtotal, method);
+
+      // 扣库存
+      for (const item of resolved) {
         db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').run(item.quantity, item.productId);
-      }
-      // H1: 金额校验 — 允许 ±0.01 误差
-      const submittedTotal = parseFloat(totalAmount);
-      if (isNaN(submittedTotal) || Math.abs(submittedTotal - expectedTotal) > 0.01) {
-        throw new Error('订单金额与商品价格不匹配');
       }
 
       const id = 'ORD' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
+      // items 存服务端解析后的字段，避免把客户端传入的 price 存入造成前后不一致
+      const storedItems = resolved.map(it => ({
+        productId: it.productId,
+        productName: it.productName,
+        price: it.price,
+        quantity: it.quantity,
+      }));
       db.prepare(
-        'INSERT INTO orders (id, userId, status, items, totalAmount, shippingMethod, shippingAddress, receiverName, receiverPhone, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run(id, user.id, 'pending', JSON.stringify(items), totalAmount, shippingMethod || 'standard', shippingAddress, receiverName, receiverPhone, remark || '');
-      ok(res, { id });
+        'INSERT INTO orders (id, userId, status, items, totalAmount, shippingFee, subtotal, shippingMethod, shippingAddress, receiverName, receiverPhone, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(id, user.id, 'pending', JSON.stringify(storedItems), total, shippingFee, subtotal, method, shippingAddress, receiverName, receiverPhone, remark || '');
+
+      return { id, subtotal, shippingFee, total, free, shippingMethod: method };
     })();
+
+    ok(res, result);
   } catch (err) {
     fail(res, err.message || '库存不足');
   }
