@@ -161,6 +161,27 @@ function migrate() {
     db.exec('ALTER TABLE orders ADD COLUMN shippingMethod TEXT DEFAULT "standard"');
     console.log('[DB] 已迁移：orders 表新增 shippingMethod 字段');
   }
+  // 订单链路补齐：物流跟踪 + 取消原因/时间
+  const hasShipTracking = ordersInfo.some(col => col.name === 'shipTracking');
+  if (!hasShipTracking) {
+    db.exec("ALTER TABLE orders ADD COLUMN shipTracking TEXT DEFAULT ''");
+    console.log('[DB] 已迁移：orders 表新增 shipTracking 字段');
+  }
+  const hasCancelledAt = ordersInfo.some(col => col.name === 'cancelledAt');
+  if (!hasCancelledAt) {
+    db.exec("ALTER TABLE orders ADD COLUMN cancelledAt TEXT DEFAULT ''");
+    console.log('[DB] 已迁移：orders 表新增 cancelledAt 字段');
+  }
+  const hasCancelledReason = ordersInfo.some(col => col.name === 'cancelledReason');
+  if (!hasCancelledReason) {
+    db.exec("ALTER TABLE orders ADD COLUMN cancelledReason TEXT DEFAULT ''");
+    console.log('[DB] 已迁移：orders 表新增 cancelledReason 字段');
+  }
+  const hasCompletedAt = ordersInfo.some(col => col.name === 'completedAt');
+  if (!hasCompletedAt) {
+    db.exec("ALTER TABLE orders ADD COLUMN completedAt TEXT DEFAULT ''");
+    console.log('[DB] 已迁移：orders 表新增 completedAt 字段');
+  }
   // 检查 users 表是否存在 disabled 列
   const usersInfo = db.prepare("PRAGMA table_info(users)").all();
   const hasDisabled = usersInfo.some(col => col.name === 'disabled');

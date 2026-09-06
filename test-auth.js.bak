@@ -1,0 +1,147 @@
+// 端到端测试：#3 认证加固
+const base = 'http://localhost:3998';
+const ua = 'node-test';
+
+async function req(method, path, { body, token } = {}) {
+  const headers = { 'Content-Type': 'application/json', 'User-Agent': ua };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(base + path, opts);
+  let text = await res.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch {}
+  const rateHeaders = {
+    remaining: res.headers.get('X-RateLimit-Remaining'),
+    reset: res.headers.get('X-RateLimit-Reset'),
+    retryAfter: res.headers.get('Retry-After'),
+  };
+  return { status: res.status, json, text, rateHeaders };
+}
+
+function ok(name, cond, extra='') {
+  console.log(`${cond ? '\u2705' : '\u274c'} ${name} ${extra}`);
+}
+
+(async () => {
+  console.log('\n=== 1) 注册 + token 含 expires ===');
+  const reg = await req('POST', '/api/auth/register', {
+    body: { username: 'alice3', password: 'Secret12345', nickname: 'Alice', phone: '13900001113' },
+  });
+  ok('注册成功', reg.status === 200, `status=${reg.status}`);
+  if (!reg.json?.data?.token) { console.log(reg.text); process.exit(1); }
+  const token = reg.json.data.token;
+  const parts = token.split(':');
+  ok('token 3 段', parts.length === 3, `parts=${parts.length}`);
+  const expires = parseInt(parts[1], 10);
+  const hours = (expires * 1000 - Date.now()) / 3600000;
+  ok('expires 在未来 7 天', hours > 6.9 && hours < 7.1, `~${hours.toFixed(2)}h`);
+  ok('sig 长度 64 (hex SHA-256)', parts[2].length === 64, `len=${parts[2].length}`);
+
+  console.log('\n=== 2) /auth/me 用新 token ===');
+  const me = await req('GET', '/api/auth/me', { token });
+  ok('返回 200', me.status === 200);
+  ok('返回 alice3', me.json?.data?.username === 'alice3', `username=${me.json?.data?.username}`);
+
+  console.log('\n=== 3) 旧格式 2 段 token 应拒绝 ===');
+  const stale1 = await req('GET', '/api/auth/me', { token: 'xxxx:yyyy' });
+  ok('401', stale1.status === 401, `status=${stale1.status}`);
+
+  console.log('\n=== 4) 3 段但已过期 token 应拒绝 ===');
+  const oldExp = Math.floor((Date.now() - 3600 * 1000) / 1000);
+  const staleToken = `alice3:${oldExp}:deadbeef`;
+  const stale2 = await req('GET', '/api/auth/me', { token: staleToken });
+  ok('401', stale2.status === 401, `status=${stale2.status}`);
+
+  console.log('\n=== 5) SSE ticket 签发 ===');
+  const tk = await req('POST', '/api/notifications/ticket', { token });
+  ok('200', tk.status === 200);
+  ok('ticket 前缀 sse_', tk.json?.data?.ticket?.startsWith('sse_'), `t=${tk.json?.data?.ticket?.substring(0,15)}...`);
+  ok('ttl 60s', tk.json?.data?.ttlMs === 60000, `ttl=${tk.json?.data?.ttlMs}`);
+
+  console.log('\n=== 6) 无 ticket / 假 ticket / 真 ticket 三连 ===');
+  const sseNo = await fetch(`${base}/api/notifications/stream`).then(r => r.status);
+  ok('无 ticket -> 401', sseNo === 401, `status=${sseNo}`);
+  const sseBad = await fetch(`${base}/api/notifications/stream?ticket=***`).then(r => r.status);
+  ok('假 ticket -> 401', sseBad === 401, `status=${sseBad}`);
+
+  console.log('\n=== 7) 错误密码登录 -> 401 + 限流头 ===');
+  const login1 = await req('POST', '/api/auth/login', {
+    body: { username: 'admin', password: 'WrongPass99' },
+  });
+  ok('401', login1.status === 401, `status=${login1.status}`);
+  ok('提示"用户名或密码错误"', login1.json?.error === '用户名或密码错误', `msg=${login1.json?.error}`);
+  ok('X-RateLimit-Remaining 有值', login1.rateHeaders.remaining !== null, `rem=${login1.rateHeaders.remaining}`);
+
+  console.log('\n=== 8) 连续登录失败触发 429 ===');
+  let hit429 = false;
+  for (let i = 2; i <= 12; i++) {
+    const r = await req('POST', '/api/auth/login', {
+      body: { username: 'nobody_user_' + i, password: 'WrongPass99' },
+    });
+    if (r.status === 429) {
+      hit429 = true;
+      console.log(`\u2705 429 at i=${i}  Retry-After=${r.rateHeaders.retryAfter}s`);
+      break;
+    }
+    console.log(`  i=${i} status=${r.status} remaining=${r.rateHeaders.remaining}`);
+  }
+  ok('12 次内触发 429', hit429);
+
+  console.log('\n=== 9) 老 SHA-256 hash 登录时自动升级为 bcrypt ===');
+  // 用一个 Node 直接连 better-sqlite3 插入 legacy hash
+  const crypto = require('crypto');
+  const Database = require('better-sqlite3');
+  const db = new Database('mall.db');
+  const legacyHash = crypto.createHash('sha256').update('OldPass1:abcd1234').digest('hex');
+  db.prepare("DELETE FROM users WHERE id='u_legacy'").run();
+  db.prepare("INSERT INTO users (id, username, password, salt, nickname, phone, role, disabled) VALUES ('u_legacy','legacyuser',?,?,?, '13899990000','user',0)")
+    .run(legacyHash, 'abcd1234', 'Legacy');
+  db.close();
+  ok('插入 legacy hash', legacyHash.length === 64, `len=${legacyHash.length}`);
+
+  const login2 = await req('POST', '/api/auth/login', {
+    body: { username: 'legacyuser', password: 'OldPass1' },
+  });
+  ok('legacy 密码登录成功', login2.status === 200, `status=${login2.status} msg=${login2.json?.error}`);
+
+  const db2 = new Database('mall.db');
+  const newHash = db2.prepare("SELECT password FROM users WHERE id='u_legacy'").get().password;
+  db2.close();
+  ok('hash 已升级为 bcrypt', /^\$2[aby]\$/.test(newHash), `hash=${newHash.substring(0,15)}...`);
+
+  // 新 token 应能正常访问
+  const me2 = await req('GET', '/api/auth/me', { token: login2.json.data.token });
+  ok('升级后新 token 可用', me2.status === 200, `status=${me2.status}`);
+
+  console.log('\n=== 10) 改密码后旧 token 立即失效 ===');
+  const cp = await req('POST', '/api/auth/change-password', {
+    token: login2.json.data.token,
+    body: { oldPassword: 'OldPass1', newPassword: 'NewPass77' },
+  });
+  ok('改密码成功', cp.status === 200, `msg=${cp.json?.data?.message}`);
+
+  // 旧 token（salt 变了）应立即失效
+  const staleAfter = await req('GET', '/api/auth/me', { token: login2.json.data.token });
+  ok('旧 token 已失效 401', staleAfter.status === 401, `status=${staleAfter.status}`);
+
+  // 新密码能登录
+  const login3 = await req('POST', '/api/auth/login', {
+    body: { username: 'legacyuser', password: 'NewPass77' },
+  });
+  ok('新密码登录成功', login3.status === 200);
+
+  console.log('\n=== 11) bcrypt 密码正确登录 ===');
+  const login4 = await req('POST', '/api/auth/login', {
+    body: { username: 'zhangwei', password: 'Demo@123' },
+  });
+  ok('bcrypt 演示用户登录', login4.status === 200, `username=${login4.json?.data?.user?.username}`);
+
+  console.log('\n=== 12) bcrypt 密码错误 ===');
+  const login5 = await req('POST', '/api/auth/login', {
+    body: { username: 'zhangwei', password: 'wrong' },
+  });
+  ok('错误密码 401', login5.status === 401);
+
+  console.log('\n=== DONE ===');
+})().catch(e => { console.error(e); process.exit(1); });

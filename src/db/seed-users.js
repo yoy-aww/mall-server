@@ -1,47 +1,53 @@
-const { hashPassword, generateSalt } = require('../auth');
-
-const ADMIN_USERNAME = 'admin';
-const ADMIN_PASSWORD = 'admin123';
-const ADMIN_ID = 'u_admin';
-
 /**
- * 如果管理员账号不存在则创建
+ * 用户种子数据 — bcrypt 散列
+ * id 命名沿用历史（u_zhangsan / u_lisi / u_wangwu / u_zhaomin / u_chenhao / u_liuyang），
+ * 因为 seed-orders / seed-reviews / seed-aftersales / seed-addresses 都依赖这些 id。
  */
-function ensureAdmin() {
-  const { getDb } = require('./database');
-  const db = getDb();
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(ADMIN_USERNAME);
-  if (existing) return;
+const bcrypt = require('bcryptjs');
+const { getDb } = require('./database');
 
-  const salt = generateSalt();
-  const pwHash = hashPassword(ADMIN_PASSWORD, salt);
-  db.prepare(
-    'INSERT INTO users (id, username, password, salt, nickname, phone, role) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).run(ADMIN_ID, ADMIN_USERNAME, pwHash, salt, '管理员', '', 'admin');
-  console.log('[Seed] 创建默认管理员账号 admin/admin123');
-}
-
-// 普通用户种子（供 mall-web 登录演示用）
-const DEMO_USERS = [
-  { username: 'zhangsan', password: '123456', nickname: '张三',  phone: '138****1234', role: 'user' },
-  { username: 'lisi',     password: '123456', nickname: '李四',  phone: '139****5678', role: 'user' },
-  { username: 'wangwu',   password: '123456', nickname: '王五',  phone: '150****9012', role: 'user' },
-];
+const BCRYPT_ROUNDS = 10;
 
 function seedDemoUsers() {
-  const { getDb } = require('./database');
   const db = getDb();
-  for (const u of DEMO_USERS) {
-    const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(u.username);
-    if (existing) continue;
-    const salt = generateSalt();
-    const pwHash = hashPassword(u.password, salt);
-    const id = 'u_' + u.username;
-    db.prepare(
-      'INSERT INTO users (id, username, password, salt, nickname, phone, role) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, u.username, pwHash, salt, u.nickname, u.phone, u.role);
+  const existing = db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'user'").get().c;
+  if (existing > 0) {
+    console.log('[Seed] 用户表已有普通用户，跳过导入');
+    return;
   }
-  console.log(`[Seed] 导入 ${DEMO_USERS.length} 个演示用户`);
+
+  const insert = db.prepare(
+    "INSERT INTO users (id, username, password, salt, nickname, phone, role, disabled) VALUES (?, ?, ?, '', ?, ?, 'user', 0)"
+  );
+
+  // 演示用户 — 密码都是 Demo@123，bcrypt 散列
+  // 注意：id 用历史命名，其他 seed 依赖
+  const demoUsers = [
+    { id: 'u_zhangsan', username: 'zhangwei',  nickname: '张伟', phone: '13800138001', pw: 'Demo@123' },
+    { id: 'u_lisi',     username: 'lina',      nickname: '李娜', phone: '13800138002', pw: 'Demo@123' },
+    { id: 'u_wangwu',   username: 'wangqiang', nickname: '王强', phone: '13800138003', pw: 'Demo@123' },
+    { id: 'u_zhaomin',  username: 'zhaomin',   nickname: '赵敏', phone: '13800138004', pw: 'Demo@123' },
+    { id: 'u_chenhao',  username: 'chenhao',   nickname: '陈浩', phone: '13800138005', pw: 'Demo@123' },
+    { id: 'u_liuyang',  username: 'liuyang',   nickname: '刘洋', phone: '13800138006', pw: 'Demo@123' },
+  ];
+
+  for (const u of demoUsers) {
+    insert.run(u.id, u.username, bcrypt.hashSync(u.pw, BCRYPT_ROUNDS), u.nickname, u.phone);
+  }
+  console.log(`[Seed] 导入 ${demoUsers.length} 个演示用户（bcrypt）`);
 }
 
-module.exports = { ensureAdmin, seedDemoUsers };
+function ensureAdmin() {
+  const db = getDb();
+  const admin = db.prepare("SELECT id FROM users WHERE role = 'admin'").get();
+  if (admin) return;
+
+  // 默认管理员: admin / Admin@123（bcrypt）
+  db.prepare(
+    "INSERT INTO users (id, username, password, salt, nickname, phone, role, disabled) VALUES (?, ?, ?, '', ?, ?, 'admin', 0)"
+  ).run('admin_001', 'admin', bcrypt.hashSync('Admin@123', BCRYPT_ROUNDS), '管理员', '13800000000');
+
+  console.log('[Seed] 创建默认管理员 admin / Admin@123（bcrypt）');
+}
+
+module.exports = { seedDemoUsers, ensureAdmin };
