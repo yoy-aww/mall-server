@@ -3,14 +3,10 @@ const router = express.Router();
 const { getDb } = require('../db/database');
 const { requireAuth } = require('./auth');
 const { verifySseTicket, issueSseTicket, SSE_TICKET_TTL_MS } = require('../auth');
+const sse = require('../utils/notification');
 
 function ok(res, data) { res.json({ success: true, data }); }
 function fail(res, msg, status = 400) { res.status(status).json({ success: false, error: msg }); }
-
-// ========== SSE 连接管理 ==========
-
-/** @type {Map<string, Set<import('http').ServerResponse>>} */
-const clients = new Map(); // userId -> Set<res>
 
 // POST /api/notifications/ticket — 用长期 token 换一次性 SSE ticket（默认 60 秒）
 // EventSource 不能带自定义 header，直接把 Bearer token 放 query 会进 access log，
@@ -43,9 +39,8 @@ router.get('/stream', (req, res) => {
   }
   res.write(`event: hello\ndata: ${JSON.stringify({ userId, ts: Date.now() })}\n\n`);
 
-  // 注册到连接池
-  if (!clients.has(userId)) clients.set(userId, new Set());
-  clients.get(userId).add(res);
+  // 注册到共享连接池
+  sse.register(userId, res);
 
   // 心跳（每 30s）
   const heartbeat = setInterval(() => {
@@ -55,11 +50,7 @@ router.get('/stream', (req, res) => {
   // 客户端断开
   req.on('close', () => {
     clearInterval(heartbeat);
-    const set = clients.get(userId);
-    if (set) {
-      set.delete(res);
-      if (set.size === 0) clients.delete(userId);
-    }
+    sse.unregister(userId, res);
   });
 });
 
@@ -95,7 +86,7 @@ router.post('/read-all', requireAuth, (req, res) => {
   ok(res, { count: result.changes });
 });
 
-// POST /api/notifications/mark-read — 同 read-all（兼容旧路径）
+// POST /api/notifications/mark-read — 兼容旧路径
 router.post('/mark-read', requireAuth, (req, res) => {
   const db = getDb();
   const result = db.prepare('UPDATE notifications SET isRead = 1 WHERE userId = ? AND isRead = 0')
@@ -103,19 +94,8 @@ router.post('/mark-read', requireAuth, (req, res) => {
   ok(res, { count: result.changes });
 });
 
-// ========== 广播函数（供其他路由调用） ==========
-
-function broadcast(event, data) {
-  if (!clients.size) return;
-  const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const [, set] of clients) {
-    for (const res of set) {
-      try { res.write(message); } catch { /* ignore */ }
-    }
-  }
-}
-
-// 直接把 router 作为默认导出，附加 broadcast 函数供外部调用
-router.broadcast = broadcast;
+// 把 SSE 广播挂到 router 上，兼容旧调用点（app.js 或外部 require）
+router.broadcast = sse.broadcast;
+router.pushNotification = sse.pushNotification;
 router.SSE_TICKET_TTL_MS = SSE_TICKET_TTL_MS;
 module.exports = router;
