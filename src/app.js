@@ -10,7 +10,6 @@ const categoryRoutes = require('./routes/categories');
 const productRoutes = require('./routes/products');
 const orderRoutes = require('./routes/orders');
 const reviewRoutes = require('./routes/reviews');
-const uploadRoutes = require('./routes/upload');
 
 // DB 初始化由 index.js 统一负责，避免重复
 
@@ -43,7 +42,6 @@ app.use('/api/products', productRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/stats', require('./routes/stats'));
 app.use('/api/notifications', require('./routes/notifications'));
-app.use('/api/upload', uploadRoutes);
 
 // 健康检查
 app.get('/api/health', (req, res) => {
