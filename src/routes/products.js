@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
-const { safeImage } = require('./imageFix');
 const { requireAuth, requireAdmin } = require('./auth');
 
 function ok(res, data) { res.json({ success: true, data }); }
@@ -21,7 +20,7 @@ function rowToProduct(row) {
   if (!row) return null;
   return {
     ...row,
-    image: safeImage(row.image),
+    image: row.image || '',
     tags: row.tags ? JSON.parse(row.tags) : [],
     enabled: row.enabled === 1 || row.enabled === '1',
   };

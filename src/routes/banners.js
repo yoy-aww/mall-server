@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
-const { safeImage } = require('./imageFix');
 const { requireAuth, requireAdmin } = require('./auth');
 
 // 工具：包装返回格式
@@ -15,7 +14,7 @@ function fail(res, msg, status = 400) {
 function fixRow(row) {
   if (!row) return row;
   row = { ...row };
-  row.image = safeImage(row.image);
+  row.image = row.image || '';
   return row;
 }
 
