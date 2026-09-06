@@ -4,6 +4,7 @@ const { getDb } = require('../db/database');
 const { requireAuth, requireAdmin } = require('./auth');
 const { pushNotification } = require('../utils/notification');
 const orderUtil = require('../utils/order');
+const { parsePaging } = require('../utils/paging');
 
 function ok(res, data) { res.json({ success: true, data }); }
 function fail(res, msg, status = 400) { res.status(status).json({ success: false, error: msg }); }
@@ -110,23 +111,21 @@ router.post('/', requireAuth, (req, res) => {
   }
 });
 
-// GET /api/orders — 列表
+// GET /api/orders — 列表（分页 + 过滤）
 router.get('/', requireAuth, (req, res) => {
   const db = getDb();
-  const { userId, status, limit = 20, offset = 0 } = req.query;
-  const lim = Math.min(parseInt(limit, 10) || 20, 100);
-  const off = Math.max(parseInt(offset, 10) || 0, 0);
+  const p = parsePaging(req.query);
 
   let where = '';
   const params = [];
-  const filterUserId = userId || (req.user.role !== 'admin' ? req.user.id : null);
+  const filterUserId = req.query.userId || (req.user.role !== 'admin' ? req.user.id : null);
   if (filterUserId) { where += 'WHERE userId = ?'; params.push(filterUserId); }
-  if (status) { where += (where ? ' AND ' : 'WHERE ') + 'status = ?'; params.push(status); }
+  if (req.query.status) { where += (where ? ' AND ' : 'WHERE ') + 'status = ?'; params.push(req.query.status); }
 
   const total = db.prepare(`SELECT COUNT(*) as c FROM orders ${where}`).get(...params).c;
   const rows = db.prepare(`SELECT * FROM orders ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`)
-    .all(...params, lim, off);
-  ok(res, { list: rows.map(rowToOrder), total, limit: lim, offset: off });
+    .all(...params, ...p.params);
+  ok(res, { list: rows.map(rowToOrder), pagination: p.toMeta(total) });
 });
 
 // GET /api/orders/admin/stats — 管理员订单统计
