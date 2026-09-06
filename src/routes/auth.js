@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
-const { signToken, verifyToken, hashPassword, generateSalt } = require('../auth');
+const { signToken, verifyToken, hashPassword, verifyPassword, generateSalt, isLegacyHash } = require('../auth');
+const { rateLimit, loginLimiter, registerLimiter } = require('../rate-limit');
 
 function ok(res, data) { res.json({ success: true, data }); }
 function fail(res, msg, status = 400) { res.status(status).json({ success: false, error: msg }); }
@@ -24,7 +25,6 @@ function requireAuth(req, res, next) {
   if (!user) return fail(res, '登录已过期', 401);
   if (user.disabled) return fail(res, '账号已被禁用', 403);
 
-  // 去掉密码和盐
   const { password, salt, ...safeUser } = user;
   req.user = safeUser;
   next();
@@ -38,22 +38,22 @@ function requireAdmin(req, res, next) {
 
 // ============ 注册 ============
 
-// POST /api/auth/register
-router.post('/register', (req, res) => {
+// POST /api/auth/register（限流：每 IP 15 分钟内最多 5 次）
+router.post('/register', rateLimit(registerLimiter), async (req, res) => {
   const { username, password, nickname, phone } = req.body;
   if (!username || !password) return fail(res, '用户名和密码为必填');
   if (username.length < 3) return fail(res, '用户名至少 3 位');
   if (password.length < 6) return fail(res, '密码至少 6 位');
-  // H9: phone 格式校验
+  // 手机号格式校验
   if (phone && !/^1[3-9]\d{9}$/.test(phone)) return fail(res, '手机号格式不正确');
 
   const db = getDb();
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (existing) return fail(res, '用户名已存在');
 
-  const salt = generateSalt();
-  const pwHash = hashPassword(password, salt);
-  const id = 'u_' + Date.now().toString(36);
+  const pwHash = await hashPassword(password); // bcrypt
+  const salt = generateSalt();                  // 兼容字段，token 仍绑定它
+  const id = 'u_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 5);
 
   db.prepare(
     'INSERT INTO users (id, username, password, salt, nickname, phone, role) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -68,8 +68,8 @@ router.post('/register', (req, res) => {
 
 // ============ 登录 ============
 
-// POST /api/auth/login
-router.post('/login', (req, res) => {
+// POST /api/auth/login（限流：每 IP 15 分钟内最多 10 次）
+router.post('/login', rateLimit(loginLimiter), async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return fail(res, '请输入用户名和密码');
 
@@ -77,17 +77,25 @@ router.post('/login', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   if (!user || user.disabled) return fail(res, '用户名或密码错误');
 
-  const expected = hashPassword(password, user.salt);
-  if (expected !== user.password) return fail(res, '用户名或密码错误');
+  // 兼容旧 hash / 新 bcrypt 两条路径
+  const valid = await verifyPassword(password, user.password, user.salt);
+  if (!valid) return fail(res, '用户名或密码错误');
+
+  // 老 SHA-256 hash 自动升级为 bcrypt：登录成功即换 hash + 新 salt
+  // （副作用：所有旧 token 立刻失效，用户需要重新登录一次）
+  if (isLegacyHash(user.password)) {
+    const newSalt = generateSalt();
+    const newHash = await hashPassword(password);
+    db.prepare('UPDATE users SET password = ?, salt = ?, updatedAt = datetime(\'now\') WHERE id = ?')
+      .run(newHash, newSalt, user.id);
+    user.salt = newSalt;
+    console.log(`[Auth] 用户 ${user.username} 密码已自动升级为 bcrypt`);
+  }
 
   const token = signToken(user.id, user.salt);
 
-  // 去掉敏感字段
-  const { password: _, salt, ...safeUser } = user;
-  ok(res, {
-    token,
-    user: safeUser,
-  });
+  const { password: _p, salt, ...safeUser } = user;
+  ok(res, { token, user: safeUser });
 });
 
 // ============ 当前用户 ============
@@ -98,7 +106,7 @@ router.get('/me', requireAuth, (req, res) => {
 });
 
 // POST /api/auth/users — 管理员新增用户
-router.post('/users', requireAuth, requireAdmin, (req, res) => {
+router.post('/users', requireAuth, requireAdmin, async (req, res) => {
   const { username, password, nickname, phone } = req.body;
   if (!username || !password) return fail(res, '用户名和密码为必填');
   if (username.length < 3) return fail(res, '用户名至少 3 位');
@@ -109,7 +117,7 @@ router.post('/users', requireAuth, requireAdmin, (req, res) => {
   if (existing) return fail(res, '用户名已存在');
 
   const salt = generateSalt();
-  const pwHash = hashPassword(password, salt);
+  const pwHash = await hashPassword(password);
   const id = 'u_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 5);
 
   db.prepare(
@@ -138,24 +146,30 @@ router.put('/users/:id/status', requireAuth, requireAdmin, (req, res) => {
 // ============ 密码修改 ============
 
 // POST /api/auth/change-password
-router.post('/change-password', requireAuth, (req, res) => {
+router.post('/change-password', requireAuth, async (req, res) => {
   const { oldPassword, newPassword } = req.body;
   if (!oldPassword || !newPassword) return fail(res, '旧密码和新密码为必填');
   if (newPassword.length < 6) return fail(res, '新密码至少 6 位');
 
   const db = getDb();
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  // H10: 新密码不能与旧密码相同
-  if (hashPassword(newPassword, user.salt) === user.password) return fail(res, '新密码不能与旧密码相同');
-  const expected = hashPassword(oldPassword, user.salt);
-  if (expected !== user.password) return fail(res, '旧密码错误');
 
+  // 先校验旧密码
+  const oldValid = await verifyPassword(oldPassword, user.password, user.salt);
+  if (!oldValid) return fail(res, '旧密码错误');
+
+  // 新密码不能与旧密码相同
+  if (await verifyPassword(newPassword, user.password, user.salt)) {
+    return fail(res, '新密码不能与旧密码相同');
+  }
+
+  // 换新 salt + 新 bcrypt hash（副作用：所有旧 token 立刻失效）
   const newSalt = generateSalt();
-  const newHash = hashPassword(newPassword, newSalt);
+  const newHash = await hashPassword(newPassword);
   db.prepare('UPDATE users SET password = ?, salt = ?, updatedAt = datetime(\'now\') WHERE id = ?')
     .run(newHash, newSalt, user.id);
 
-  ok(res, { message: '密码已修改' });
+  ok(res, { message: '密码已修改，请重新登录' });
 });
 
 // ============ 管理员用户管理 ============
@@ -164,7 +178,6 @@ router.post('/change-password', requireAuth, (req, res) => {
 router.get('/users', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const rows = db.prepare('SELECT * FROM users ORDER BY createdAt DESC').all();
-  // 去掉敏感字段
   const safe = rows.map(({ password, salt, ...u }) => u);
   ok(res, safe);
 });
@@ -185,7 +198,6 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
   if (!existing) return fail(res, '用户不存在', 404);
 
   const { username, nickname, phone, role, avatar } = req.body;
-  // H11: username 唯一性校验
   if (username && username !== existing.username) {
     const dup = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username, req.params.id);
     if (dup) return fail(res, '用户名已存在');
@@ -204,7 +216,7 @@ router.put('/users/:id', requireAuth, requireAdmin, (req, res) => {
 });
 
 // POST /api/users/reset-password/:id — 管理员重置用户密码
-router.post('/users/reset-password/:id', requireAuth, requireAdmin, (req, res) => {
+router.post('/users/reset-password/:id', requireAuth, requireAdmin, async (req, res) => {
   const { password } = req.body;
   if (!password || password.length < 6) return fail(res, '新密码至少 6 位');
 
@@ -213,14 +225,14 @@ router.post('/users/reset-password/:id', requireAuth, requireAdmin, (req, res) =
   if (!existing) return fail(res, '用户不存在', 404);
 
   const salt = generateSalt();
-  const pwHash = hashPassword(password, salt);
+  const pwHash = await hashPassword(password);
   db.prepare('UPDATE users SET password=?, salt=?, updatedAt=datetime(\'now\') WHERE id=?')
     .run(pwHash, salt, req.params.id);
 
   ok(res, { message: '密码已重置' });
 });
 
-// DELETE /api/users/:id — H8: 级联删除关联数据
+// DELETE /api/users/:id
 router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
