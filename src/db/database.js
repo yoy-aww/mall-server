@@ -168,6 +168,17 @@ function migrate() {
     db.exec('ALTER TABLE users ADD COLUMN disabled INTEGER DEFAULT 0');
     console.log('[DB] 已迁移：users 表新增 disabled 字段');
   }
+  // 检查 orders 表是否存在 shippingFee / subtotal 列（运费与商品小计分开存，避免前后端各算价）
+  const hasShippingFee = ordersInfo.some(col => col.name === 'shippingFee');
+  if (!hasShippingFee) {
+    db.exec('ALTER TABLE orders ADD COLUMN shippingFee REAL DEFAULT 0');
+    console.log('[DB] 已迁移：orders 表新增 shippingFee 字段');
+  }
+  const hasSubtotal = ordersInfo.some(col => col.name === 'subtotal');
+  if (!hasSubtotal) {
+    db.exec('ALTER TABLE orders ADD COLUMN subtotal REAL DEFAULT 0');
+    console.log('[DB] 已迁移：orders 表新增 subtotal 字段');
+  }
   // 检查 notifications 表是否存在
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
   const hasNotifications = tables.some(t => t.name === 'notifications');
