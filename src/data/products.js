@@ -1,5 +1,5 @@
 // CDN 图片基础路径
-const IMAGE_BASE_PATH = 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/';
+const IMAGE_BASE_PATH = 'https://cdn.jsdelivr.net/gh/yoy-aww/mall-images/imgs/';
 
 function img(name) {
   return `${IMAGE_BASE_PATH}${name}`;

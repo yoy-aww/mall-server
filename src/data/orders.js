@@ -5,7 +5,7 @@ const orders = [
     userId: 'u_zhangsan',
     status: 'completed',
     items: JSON.stringify([
-      { productId: 'tea_1', productName: '网红柠檬蜂蜜茶', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/tea_background_7.jpg', price: 39, quantity: 2 },
+      { productId: 'tea_1', productName: '网红柠檬蜂蜜茶', productImage: 'https://cdn.jsdelivr.net/gh/yoy-aww/mall-images/imgs/tea_background_7.jpg', price: 39, quantity: 2 },
     ]),
     totalAmount: 78,
     shippingAddress: '北京市朝阳区建国路100号',
@@ -21,8 +21,8 @@ const orders = [
     userId: 'u_lisi',
     status: 'shipped',
     items: JSON.stringify([
-      { productId: 'herbs_1', productName: '野生人参片', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/herb_ingredients_3.jpg', price: 488, quantity: 1 },
-      { productId: 'herbs_2', productName: '优质当归片', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/medicine_collage_2.jpg', price: 128, quantity: 2 },
+      { productId: 'herbs_1', productName: '野生人参片', productImage: 'https://cdn.jsdelivr.net/gh/yoy-aww/mall-images/imgs/herb_ingredients_3.jpg', price: 488, quantity: 1 },
+      { productId: 'herbs_2', productName: '优质当归片', productImage: 'https://cdn.jsdelivr.net/gh/yoy-aww/mall-images/imgs/medicine_collage_2.jpg', price: 128, quantity: 2 },
     ]),
     totalAmount: 744,
     shippingAddress: '上海市浦东新区张江高科技园区',
@@ -38,7 +38,7 @@ const orders = [
     userId: 'u_wangwu',
     status: 'paid',
     items: JSON.stringify([
-      { productId: 'activity_1', productName: '限时秒杀养生套装', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/gift_box_0.jpg', price: 199, quantity: 1 },
+      { productId: 'activity_1', productName: '限时秒杀养生套装', productImage: 'https://cdn.jsdelivr.net/gh/yoy-aww/mall-images/imgs/gift_box_0.jpg', price: 199, quantity: 1 },
     ]),
     totalAmount: 199,
     shippingAddress: '广州市天河区天河路200号',
@@ -54,8 +54,8 @@ const orders = [
     userId: 'u_zhangsan',
     status: 'pending',
     items: JSON.stringify([
-      { productId: 'health_1', productName: '灵芝孢子粉胶囊', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/product_jars_7.jpg', price: 298, quantity: 1 },
-      { productId: 'welfare_1', productName: '惠民降压茶', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/tea_background_5.jpg', price: 59, quantity: 3 },
+      { productId: 'health_1', productName: '灵芝孢子粉胶囊', productImage: 'https://cdn.jsdelivr.net/gh/yoy-aww/mall-images/imgs/product_jars_7.jpg', price: 298, quantity: 1 },
+      { productId: 'welfare_1', productName: '惠民降压茶', productImage: 'https://cdn.jsdelivr.net/gh/yoy-aww/mall-images/imgs/tea_background_5.jpg', price: 59, quantity: 3 },
     ]),
     totalAmount: 475,
     shippingAddress: '北京市朝阳区建国路100号',
@@ -71,7 +71,7 @@ const orders = [
     userId: 'u_lisi',
     status: 'cancelled',
     items: JSON.stringify([
-      { productId: 'tea_2', productName: '玫瑰花茶礼盒', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/gift_box_5.jpg', price: 128, quantity: 1 },
+      { productId: 'tea_2', productName: '玫瑰花茶礼盒', productImage: 'https://cdn.jsdelivr.net/gh/yoy-aww/mall-images/imgs/gift_box_5.jpg', price: 128, quantity: 1 },
     ]),
     totalAmount: 128,
     shippingAddress: '深圳市南山区科技园',
@@ -87,8 +87,8 @@ const orders = [
     userId: 'u_wangwu',
     status: 'delivered',
     items: JSON.stringify([
-      { productId: 'supplements_1', productName: '复合维生素片', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/product_jars_8.jpg', price: 98, quantity: 2 },
-      { productId: 'health_2', productName: '蜂胶软胶囊', productImage: 'http://tiyycecb8.hn-bkt.clouddn.com/images/imgs/product_jars_3.jpg', price: 158, quantity: 1 },
+      { productId: 'supplements_1', productName: '复合维生素片', productImage: 'https://cdn.jsdelivr.net/gh/yoy-aww/mall-images/imgs/product_jars_8.jpg', price: 98, quantity: 2 },
+      { productId: 'health_2', productName: '蜂胶软胶囊', productImage: 'https://cdn.jsdelivr.net/gh/yoy-aww/mall-images/imgs/product_jars_3.jpg', price: 158, quantity: 1 },
     ]),
     totalAmount: 354,
     shippingAddress: '成都市高新区天府大道',
