@@ -161,7 +161,7 @@ function migrate() {
     db.exec('ALTER TABLE orders ADD COLUMN shippingMethod TEXT DEFAULT "standard"');
     console.log('[DB] 已迁移：orders 表新增 shippingMethod 字段');
   }
-  // 订单链路补齐：物流跟踪 + 取消原因/时间
+  // 订单链路：物流跟踪 + 取消/完成时间戳
   const hasShipTracking = ordersInfo.some(col => col.name === 'shipTracking');
   if (!hasShipTracking) {
     db.exec("ALTER TABLE orders ADD COLUMN shipTracking TEXT DEFAULT ''");
@@ -181,6 +181,11 @@ function migrate() {
   if (!hasCompletedAt) {
     db.exec("ALTER TABLE orders ADD COLUMN completedAt TEXT DEFAULT ''");
     console.log('[DB] 已迁移：orders 表新增 completedAt 字段');
+  }
+  const hasUpdatedAt = ordersInfo.some(col => col.name === 'updatedAt');
+  if (!hasUpdatedAt) {
+    db.exec("ALTER TABLE orders ADD COLUMN updatedAt TEXT DEFAULT ''");
+    console.log('[DB] 已迁移：orders 表新增 updatedAt 字段');
   }
   // 检查 users 表是否存在 disabled 列
   const usersInfo = db.prepare("PRAGMA table_info(users)").all();
@@ -217,6 +222,31 @@ function migrate() {
       )
     `);
     console.log('[DB] 已迁移：新增 notifications 表');
+  }
+  // 旧 notifications 表列名是 read，代码里用 isRead，重命名保持一致
+  if (hasNotifications) {
+    const notifInfo = db.prepare("PRAGMA table_info(notifications)").all();
+    const hasIsRead = notifInfo.some(col => col.name === 'isRead');
+    const hasRead = notifInfo.some(col => col.name === 'read');
+    if (!hasIsRead && hasRead) {
+      db.exec('ALTER TABLE notifications RENAME COLUMN read TO isRead');
+      console.log('[DB] 已迁移：notifications.read 重命名为 isRead');
+    }
+  }
+
+  // 补齐 salt 为空的 bcrypt 用户的 salt（旧 seed 遗留，会导致 token HMAC 校验失败）
+  try {
+    const { generateSalt } = require('../auth');
+    const emptySaltUsers = db.prepare("SELECT id, username FROM users WHERE (salt IS NULL OR salt = '') AND password IS NOT NULL AND password LIKE '$2%'").all();
+    const stmt = db.prepare('UPDATE users SET salt = ? WHERE id = ?');
+    let filled = 0;
+    for (const u of emptySaltUsers) {
+      stmt.run(generateSalt(), u.id);
+      filled++;
+    }
+    if (filled > 0) console.log(`[DB] 已为 ${filled} 个 bcrypt 用户补齐 salt`);
+  } catch (e) {
+    console.warn('[DB] salt 补齐迁移失败:', e.message);
   }
 }
 

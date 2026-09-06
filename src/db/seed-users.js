@@ -17,7 +17,7 @@ function seedDemoUsers() {
   }
 
   const insert = db.prepare(
-    "INSERT INTO users (id, username, password, salt, nickname, phone, role, disabled) VALUES (?, ?, ?, '', ?, ?, 'user', 0)"
+    "INSERT INTO users (id, username, password, salt, nickname, phone, role, disabled) VALUES (?, ?, ?, ?, ?, ?, 'user', 0)"
   );
 
   // 演示用户 — 密码都是 Demo@123，bcrypt 散列
@@ -31,22 +31,50 @@ function seedDemoUsers() {
     { id: 'u_liuyang',  username: 'liuyang',   nickname: '刘洋', phone: '13800138006', pw: 'Demo@123' },
   ];
 
+  const { generateSalt } = require('../auth');
   for (const u of demoUsers) {
-    insert.run(u.id, u.username, bcrypt.hashSync(u.pw, BCRYPT_ROUNDS), u.nickname, u.phone);
+    insert.run(u.id, u.username, bcrypt.hashSync(u.pw, BCRYPT_ROUNDS), generateSalt(), u.nickname, u.phone);
   }
   console.log(`[Seed] 导入 ${demoUsers.length} 个演示用户（bcrypt）`);
 }
 
 function ensureAdmin() {
   const db = getDb();
-  const admin = db.prepare("SELECT id FROM users WHERE role = 'admin'").get();
-  if (admin) return;
+  const { generateSalt } = require('../auth');
+  const existing = db.prepare("SELECT id, password, salt FROM users WHERE role = 'admin'").get();
 
-  // 默认管理员: admin / Admin@123（bcrypt）
+  if (existing) {
+    const isBcrypt = String(existing.password || '').startsWith('$2');
+    const hasSalt = String(existing.salt || '').length > 0;
+
+    // 1) legacy SHA-256 hash → 重置为 bcrypt Admin@123
+    if (!isBcrypt) {
+      db.prepare("UPDATE users SET password = ***, salt = ?, updatedAt = datetime('now') WHERE id = ?")
+        .run(bcrypt.hashSync('Admin@123', BCRYPT_ROUNDS), generateSalt(), existing.id);
+      console.log('[Seed] admin 为旧 SHA-256 hash，已重置为 bcrypt Admin@123');
+      return;
+    }
+
+    // 2) bcrypt 但 salt 为空（旧 seed 遗留）→ 补 salt
+    //    bcrypt 本身内嵌 salt，HMAC 校验用的是 users.salt 字段，空的会导致 token 无法验证。
+    //    补上 salt 会让已有的 token 失效，但那些 token 本来也验证不过。
+    if (!hasSalt) {
+      db.prepare("UPDATE users SET salt = ?, updatedAt = datetime('now') WHERE id = ?")
+        .run(generateSalt(), existing.id);
+      console.log('[Seed] admin bcrypt hash 已存在但 salt 为空，已补 salt');
+    }
+    return;
+  }
+
+  // 新建默认管理员：admin / Admin@123
   db.prepare(
-    "INSERT INTO users (id, username, password, salt, nickname, phone, role, disabled) VALUES (?, ?, ?, '', ?, ?, 'admin', 0)"
-  ).run('admin_001', 'admin', bcrypt.hashSync('Admin@123', BCRYPT_ROUNDS), '管理员', '13800000000');
-
+    "INSERT INTO users (id, username, password, salt, nickname, phone, role, disabled) VALUES (?, ?, ?, ?, ?, ?, 'admin', 0)"
+  ).run(
+    'admin_001', 'admin',
+    bcrypt.hashSync('Admin@123', BCRYPT_ROUNDS),
+    generateSalt(),
+    '管理员', '13800000000'
+  );
   console.log('[Seed] 创建默认管理员 admin / Admin@123（bcrypt）');
 }
 

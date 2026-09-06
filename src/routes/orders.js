@@ -1,145 +1,79 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
-const { verifyToken } = require('../auth');
 const { requireAuth, requireAdmin } = require('./auth');
-const { push: pushNotification } = require('./notifications');
+const { pushNotification } = require('../utils/notification');
+const orderUtil = require('../utils/order');
 
 function ok(res, data) { res.json({ success: true, data }); }
 function fail(res, msg, status = 400) { res.status(status).json({ success: false, error: msg }); }
 
-// 分页参数解析：GET ?page=1&limit=20
-// 不传则不分页，保持向后兼容
-function parsePagination(req) {
-  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
-  const offset = (page - 1) * limit;
-  return { page, limit, offset };
-}
-
-// 行 → 订单对象
-function rowToOrder(row) {
-  if (!row) return null;
-  return {
-    ...row,
-    items: row.items ? JSON.parse(row.items) : [],
-    paidAt: row.paidAt || undefined,
-    shippedAt: row.shippedAt || undefined,
-    remark: row.remark || undefined,
-    shippingFee: row.shippingFee || 0,
-  };
-}
-
-// ==================== 运费规则（后端作为唯一计价源） ====================
-// 规则：
-//   - 顺丰特快 sfx: 固定 15，无免邮门槛
-//   - 标准快递 standard: 商品小计 ≥ 199 免邮，否则 8
-// 新增规则只需改这里 + 同步前端展示文案
+// 运费规则（后端为唯一计价源）
 const SHIPPING_RULES = {
   standard: { fee: 8, freeThreshold: 199 },
-  sfx:      { fee: 15, freeThreshold: Infinity },
+  sfx: { fee: 15, freeThreshold: Infinity },
 };
 
-/**
- * 根据商品小计和配送方式算运费
- * @param {number} subtotal 商品小计（不含运费）
- * @param {'standard'|'sfx'} method
- * @returns {{ shippingFee: number, subtotal: number, total: number, free: boolean }}
- */
 function calculateShippingFee(subtotal, method) {
-  const m = SHIPPING_RULES[method] || SHIPPING_RULES.standard;
-  const free = subtotal >= m.freeThreshold;
-  const shippingFee = free ? 0 : m.fee;
-  const total = subtotal + shippingFee;
-  return { shippingFee, subtotal, total, free };
+  const rule = SHIPPING_RULES[method] || SHIPPING_RULES.standard;
+  const shippingFee = (rule.freeThreshold < Infinity && subtotal >= rule.freeThreshold) ? 0 : rule.fee;
+  return { shippingFee, subtotal, total: subtotal + shippingFee, free: shippingFee === 0 };
 }
 
-/**
- * 从 items + DB 里查到的商品重算商品小计
- * 返回 [{product, quantity}] 和 subtotal，同时校验商品存在、库存、单价。
- */
 function resolveItemsFromDb(db, items) {
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new Error('items 不能为空');
-  }
+  if (!Array.isArray(items) || items.length === 0) throw new Error('商品不能为空');
   const resolved = [];
   let subtotal = 0;
   for (const item of items) {
-    if (!item.productId) throw new Error('items 缺少 productId');
-    const qty = Number(item.quantity);
-    if (!Number.isInteger(qty) || qty <= 0) throw new Error(`商品 ${item.productId} 数量非法`);
-
-    const product = db.prepare(
-      'SELECT id, name, stock, discountedPrice, originalPrice FROM products WHERE id = ?'
-    ).get(item.productId);
-    if (!product) throw new Error(`${item.productName || item.productId} 不存在`);
-    if (product.stock < qty) {
-      throw new Error(`${product.name} 库存不足（剩 ${product.stock} 件，需要 ${qty} 件）`);
-    }
+    const productId = item.productId;
+    const qty = Math.max(1, parseInt(item.quantity, 10) || 1);
+    if (!productId) throw new Error('productId 必填');
+    const product = db.prepare('SELECT id, name, discountedPrice, originalPrice, stock FROM products WHERE id = ?').get(productId);
+    if (!product) throw new Error(`${productId} 不存在`);
+    if (product.stock < qty) throw new Error(`${product.name} 库存不足（剩 ${product.stock} 件）`);
     const price = product.discountedPrice || product.originalPrice;
     subtotal += price * qty;
-    resolved.push({ productId: product.id, productName: product.name, price, quantity: qty });
+    resolved.push({ productId, productName: product.name, price, quantity: qty });
   }
   return { resolved, subtotal };
 }
 
-// 供预览接口复用：只算不扣库存
-function previewOrderItems(db, items, shippingMethod) {
-  const { resolved, subtotal } = resolveItemsFromDb(db, items);
-  const method = SHIPPING_RULES[shippingMethod] ? shippingMethod : 'standard';
-  const { shippingFee, total, free } = calculateShippingFee(subtotal, method);
-  return { items: resolved, subtotal, shippingFee, total, free, shippingMethod: method };
+function rowToOrder(row) {
+  return {
+    ...row,
+    items: safeParse(row.items, []),
+  };
 }
 
-// GET /api/orders — 所有订单（按创建时间倒序），支持 ?userId=xxx&status=xxx&page=&limit=
-router.get('/', requireAuth, (req, res) => {
-  const db = getDb();
-  const { page, limit, offset } = parsePagination(req);
-  const usePage = req.query.page || req.query.limit;
+function safeParse(s, fallback) {
+  try { return JSON.parse(s); } catch { return fallback; }
+}
 
-  let where = '1=1';
-  const params = [];
-  if (req.user.role === 'admin') {
-    if (req.query.userId) { where += ' AND userId = ?'; params.push(req.query.userId); }
-    if (req.query.status) { where += ' AND status = ?'; params.push(req.query.status); }
-  } else {
-    where += ' AND userId = ?'; params.push(req.user.id);
-    if (req.query.status) { where += ' AND status = ?'; params.push(req.query.status); }
-  }
-
-  const countRow = db.prepare(`SELECT COUNT(*) as total FROM orders WHERE ${where}`).get(...params);
-  const total = countRow.total;
-
-  let rows;
-  if (usePage) {
-    rows = db.prepare(`SELECT * FROM orders WHERE ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
-  } else {
-    rows = db.prepare(`SELECT * FROM orders WHERE ${where} ORDER BY createdAt DESC`).all(...params);
-  }
-
-  if (usePage) {
-    ok(res, { list: rows.map(rowToOrder), total, page, limit });
-  } else {
-    ok(res, rows.map(rowToOrder));
-  }
-});
+/**
+ * 校验订单归属：本人或管理员
+ */
+function canAccessOrder(order, user) {
+  return order && (order.userId === user.id || user.role === 'admin');
+}
 
 // POST /api/orders/preview — 报价（前端展示金额用），不扣库存
-// 请求：{ items: [{productId, quantity}], shippingMethod?: 'standard'|'sfx' }
-// 响应：{ items, subtotal, shippingFee, total, free, shippingMethod }
 router.post('/preview', requireAuth, (req, res) => {
   const db = getDb();
   const { items, shippingMethod } = req.body || {};
   try {
-    const result = previewOrderItems(db, items, shippingMethod);
-    ok(res, result);
+    const { resolved, subtotal } = resolveItemsFromDb(db, items);
+    const method = SHIPPING_RULES[shippingMethod] ? shippingMethod : 'standard';
+    const { shippingFee, total, free } = calculateShippingFee(subtotal, method);
+    ok(res, {
+      items: resolved,
+      subtotal, shippingFee, total, free, shippingMethod: method,
+    });
   } catch (err) {
-    fail(res, err.message || '报价失败');
+    fail(res, err.message);
   }
 });
 
-// POST /api/orders — 创建订单（普通用户，需登录）
-// 金额以服务端计算为准，客户端传入的 totalAmount 仅用于兼容旧版客户端（若不一致以服务端为准）。
+// POST /api/orders — 创建订单
 router.post('/', requireAuth, (req, res) => {
   const user = req.user;
   const db = getDb();
@@ -157,19 +91,12 @@ router.post('/', requireAuth, (req, res) => {
       const method = SHIPPING_RULES[shippingMethod] ? shippingMethod : 'standard';
       const { shippingFee, total, free } = calculateShippingFee(subtotal, method);
 
-      // 扣库存
       for (const item of resolved) {
         db.prepare('UPDATE products SET stock = stock - ? WHERE id = ?').run(item.quantity, item.productId);
       }
 
       const id = 'ORD' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
-      // items 存服务端解析后的字段，避免把客户端传入的 price 存入造成前后不一致
-      const storedItems = resolved.map(it => ({
-        productId: it.productId,
-        productName: it.productName,
-        price: it.price,
-        quantity: it.quantity,
-      }));
+      const storedItems = resolved;
       db.prepare(
         'INSERT INTO orders (id, userId, status, items, totalAmount, shippingFee, subtotal, shippingMethod, shippingAddress, receiverName, receiverPhone, remark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       ).run(id, user.id, 'pending', JSON.stringify(storedItems), total, shippingFee, subtotal, method, shippingAddress, receiverName, receiverPhone, remark || '');
@@ -183,130 +110,157 @@ router.post('/', requireAuth, (req, res) => {
   }
 });
 
-// GET /api/orders/:id
+// GET /api/orders — 列表
+router.get('/', requireAuth, (req, res) => {
+  const db = getDb();
+  const { userId, status, limit = 20, offset = 0 } = req.query;
+  const lim = Math.min(parseInt(limit, 10) || 20, 100);
+  const off = Math.max(parseInt(offset, 10) || 0, 0);
+
+  let where = '';
+  const params = [];
+  const filterUserId = userId || (req.user.role !== 'admin' ? req.user.id : null);
+  if (filterUserId) { where += 'WHERE userId = ?'; params.push(filterUserId); }
+  if (status) { where += (where ? ' AND ' : 'WHERE ') + 'status = ?'; params.push(status); }
+
+  const total = db.prepare(`SELECT COUNT(*) as c FROM orders ${where}`).get(...params).c;
+  const rows = db.prepare(`SELECT * FROM orders ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`)
+    .all(...params, lim, off);
+  ok(res, { list: rows.map(rowToOrder), total, limit: lim, offset: off });
+});
+
+// GET /api/orders/admin/stats — 管理员订单统计
+router.get('/admin/stats', requireAuth, requireAdmin, (req, res) => {
+  const db = getDb();
+  const countByStatus = db.prepare(
+    'SELECT status, COUNT(*) as c FROM orders GROUP BY status'
+  ).all();
+  const revenuePaid = db.prepare(
+    "SELECT COALESCE(SUM(totalAmount), 0) as revenue FROM orders WHERE status IN ('paid', 'shipped', 'delivered', 'completed')"
+  ).get().revenue;
+  const revenueCompleted = db.prepare(
+    "SELECT COALESCE(SUM(totalAmount), 0) as revenue FROM orders WHERE status = 'completed'"
+  ).get().revenue;
+  ok(res, { countByStatus, revenuePaid, revenueCompleted });
+});
+
+// GET /api/orders/:id — 详情
 router.get('/:id', requireAuth, (req, res) => {
   const db = getDb();
   const row = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!row) return fail(res, '订单不存在', 404);
-  if (row.userId !== req.user.id && req.user.role !== 'admin') return fail(res, '无权限', 403);
+  if (!canAccessOrder(row, req.user)) return fail(res, '无权限', 403);
   ok(res, rowToOrder(row));
 });
 
-// PUT /api/orders/:id/status — 更新订单状态（仅管理员）
-router.put('/:id/status', requireAuth, requireAdmin, (req, res) => {
-  const db = getDb();
-  const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
-  if (!existing) return fail(res, '订单不存在', 404);
-
-  const { status } = req.body;
-  const valid = ['pending', 'paid', 'shipped', 'delivered', 'cancelled', 'completed'];
-  if (!valid.includes(status)) return fail(res, `无效状态: ${status}`);
-
-  // H5: 状态机 — 只允许向前推进或取消
-  const order = ['pending', 'paid', 'shipped', 'delivered', 'completed'];
-  const fromIdx = order.indexOf(existing.status);
-  const toIdx = order.indexOf(status);
-  if (status !== 'cancelled' && status !== existing.status) {
-    if (fromIdx === -1 || toIdx === -1) return fail(res, `无效状态: ${status}`);
-    if (toIdx < fromIdx) return fail(res, `不能从 ${existing.status} 退回 ${status}`);
-  }
-  if (status === 'cancelled' && existing.status === 'completed') return fail(res, '已完成订单不可取消');
-
-  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  let paidAt = existing.paidAt;
-  let shippedAt = existing.shippedAt;
-
-  if (status === 'paid' && !paidAt) paidAt = now;
-  if (status === 'shipped' && !shippedAt) shippedAt = now;
-
-  // 取消订单 → 恢复库存
-  if (status === 'cancelled') {
-    const items = existing.items ? JSON.parse(existing.items) : [];
-    db.transaction(() => {
-      for (const item of items) {
-        db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(item.quantity, item.productId);
-      }
-      db.prepare('UPDATE orders SET status = ?, paidAt = ?, shippedAt = ? WHERE id = ?')
-        .run(status, paidAt, shippedAt, req.params.id);
-    })();
-    ok(res, { id: req.params.id, status, stockRestored: true });
-    return;
-  }
-
-  // 已下单即扣库存，状态变更不再重复扣减
-  db.prepare('UPDATE orders SET status = ?, paidAt = ?, shippedAt = ? WHERE id = ?')
-    .run(status, paidAt, shippedAt, req.params.id);
-
-  // 通知用户（仅关键状态变更）
-  const notifyStatuses = ['paid', 'shipped', 'delivered', 'completed', 'cancelled'];
-  const userNotify = {
-    paid:      { title: '支付成功',       content: `订单 ${req.params.id} 已付款，正在为您准备` },
-    shipped:   { title: '已发货',         content: `订单 ${req.params.id} 已发货，请注意查收` },
-    delivered: { title: '已签收',         content: `订单 ${req.params.id} 已签收` },
-    completed: { title: '已完成',         content: `订单 ${req.params.id} 已完成` },
-    cancelled: { title: '已取消',         content: `订单 ${req.params.id} 已取消` },
-  };
-  if (notifyStatuses.includes(status)) {
-    const n = userNotify[status];
-    const nid = 'n_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-    db.prepare(
-      'INSERT INTO notifications (id, userId, type, title, content, relatedId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(nid, existing.userId, 'order', n.title, n.content, req.params.id, now);
-
-    // 实时推送 SSE（前端已连接的用户立即收到）
-    pushNotification(existing.userId, {
-      id: nid,
-      type: 'order',
-      title: n.title,
-      content: n.content,
-      relatedId: req.params.id,
-      createdAt: now,
-    });
-  }
-
-  ok(res, { id: req.params.id, status });
+// POST /api/orders/:id/payment — 支付（本人或管理员，pending → paid）
+router.post('/:id/payment', requireAuth, (req, res) => {
+  const r = orderUtil.applyStatusChange({
+    orderId: req.params.id,
+    toStatus: 'paid',
+    operatorId: req.user.id,
+    operatorIsAdmin: req.user.role === 'admin',
+    pushNotification,
+  });
+  if (!r.ok) return fail(res, r.error, r.status || 400);
+  ok(res, r.data);
 });
 
-// PUT /api/orders/:id — 更新订单（如发货信息，仅管理员）
+// POST /api/orders/:id/cancel — 取消（本人或管理员，pending/paid → cancelled）
+router.post('/:id/cancel', requireAuth, (req, res) => {
+  const { reason } = req.body || {};
+  const r = orderUtil.applyStatusChange({
+    orderId: req.params.id,
+    toStatus: 'cancelled',
+    operatorId: req.user.id,
+    operatorIsAdmin: req.user.role === 'admin',
+    reason: (reason || '').slice(0, 200),
+    pushNotification,
+  });
+  if (!r.ok) return fail(res, r.error, r.status || 400);
+  ok(res, r.data);
+});
+
+// POST /api/orders/:id/ship — 管理员发货（paid → shipped，可带 tracking）
+router.post('/:id/ship', requireAuth, requireAdmin, (req, res) => {
+  const { tracking } = req.body || {};
+  const r = orderUtil.applyStatusChange({
+    orderId: req.params.id,
+    toStatus: 'shipped',
+    operatorId: req.user.id,
+    operatorIsAdmin: true,
+    tracking: (tracking || '').slice(0, 100),
+    pushNotification,
+  });
+  if (!r.ok) return fail(res, r.error, r.status || 400);
+  ok(res, r.data);
+});
+
+// POST /api/orders/:id/deliver — 管理员或用户确认签收（shipped → delivered）
+router.post('/:id/deliver', requireAuth, (req, res) => {
+  const r = orderUtil.applyStatusChange({
+    orderId: req.params.id,
+    toStatus: 'delivered',
+    operatorId: req.user.id,
+    operatorIsAdmin: req.user.role === 'admin',
+    pushNotification,
+  });
+  if (!r.ok) return fail(res, r.error, r.status || 400);
+  ok(res, r.data);
+});
+
+// POST /api/orders/:id/confirm — 用户确认完成（delivered → completed）
+router.post('/:id/confirm', requireAuth, (req, res) => {
+  const r = orderUtil.applyStatusChange({
+    orderId: req.params.id,
+    toStatus: 'completed',
+    operatorId: req.user.id,
+    operatorIsAdmin: req.user.role === 'admin',
+    pushNotification,
+  });
+  if (!r.ok) return fail(res, r.error, r.status || 400);
+  ok(res, r.data);
+});
+
+// POST /api/orders/auto-complete — 触发自动完成（管理员或健康检查定时调用）
+router.post('/auto-complete', requireAuth, requireAdmin, (req, res) => {
+  const { days } = req.body || {};
+  const result = orderUtil.autoCompleteDelivered({ days: Math.max(1, parseInt(days, 10) || 7) });
+  ok(res, { completed: result.length, ids: result });
+});
+
+// PUT /api/orders/:id/status — 兼容旧接口：管理员通用改状态
+router.put('/:id/status', requireAuth, requireAdmin, (req, res) => {
+  const { status, tracking, reason } = req.body || {};
+  const r = orderUtil.applyStatusChange({
+    orderId: req.params.id,
+    toStatus: status,
+    operatorId: req.user.id,
+    operatorIsAdmin: true,
+    tracking: (tracking || '').slice(0, 100),
+    reason: (reason || '').slice(0, 200),
+    pushNotification,
+  });
+  if (!r.ok) return fail(res, r.error, r.status || 400);
+  ok(res, r.data);
+});
+
+// PUT /api/orders/:id — 更新非状态字段（收件信息、备注；管理员）
 router.put('/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!existing) return fail(res, '订单不存在', 404);
 
-  const { status, receiverName, receiverPhone, shippingAddress, remark } = req.body;
-
-  // H2: status 合法值 + 状态机校验
-  let paidAt = existing.paidAt;
-  let shippedAt = existing.shippedAt;
-  if (status && status !== existing.status) {
-    const valid = ['pending', 'paid', 'shipped', 'delivered', 'cancelled', 'completed'];
-    if (!valid.includes(status)) return fail(res, `无效状态: ${status}`);
-    const order = ['pending', 'paid', 'shipped', 'delivered', 'completed'];
-    const fromIdx = order.indexOf(existing.status);
-    const toIdx = order.indexOf(status);
-    if (status !== 'cancelled') {
-      if (fromIdx === -1 || toIdx === -1) return fail(res, `无效状态: ${status}`);
-      if (toIdx < fromIdx) return fail(res, `不能从 ${existing.status} 退回 ${status}`);
-    }
-    if (status === 'cancelled' && existing.status === 'completed') return fail(res, '已完成订单不可取消');
-  }
-  if (status === 'paid' && !paidAt) {
-    paidAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  }
-  if (status === 'shipped' && !shippedAt) {
-    shippedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  }
+  const { receiverName, receiverPhone, shippingAddress, remark } = req.body;
 
   db.prepare(
-    `UPDATE orders SET status=?, receiverName=?, receiverPhone=?, shippingAddress=?, remark=?, paidAt=?, shippedAt=? WHERE id=?`
+    `UPDATE orders SET receiverName=?, receiverPhone=?, shippingAddress=?, remark=?, updatedAt=? WHERE id=?`
   ).run(
-    status ?? existing.status,
     receiverName ?? existing.receiverName,
     receiverPhone ?? existing.receiverPhone,
     shippingAddress ?? existing.shippingAddress,
     remark ?? existing.remark,
-    paidAt,
-    shippedAt,
+    orderUtil.nowStamp(),
     req.params.id
   );
   ok(res, { id: req.params.id });
@@ -318,20 +272,6 @@ router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
   const result = db.prepare('DELETE FROM orders WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return fail(res, '订单不存在', 404);
   ok(res, { deleted: req.params.id });
-});
-
-// POST /api/orders/:id/payment — 模拟支付（仅 pending 订单可支付）
-router.post('/:id/payment', requireAuth, (req, res) => {
-  const db = getDb();
-  const existing = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
-  if (!existing) return fail(res, '订单不存在', 404);
-  if (existing.userId !== req.user.id && req.user.role !== 'admin') return fail(res, '无权限', 403);
-  if (existing.status !== 'pending') return fail(res, `订单状态为 ${existing.status}，不可支付`);
-
-  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  db.prepare('UPDATE orders SET status = ?, paidAt = ? WHERE id = ?')
-    .run('paid', now, req.params.id);
-  ok(res, { id: req.params.id, status: 'paid', paidAt: now });
 });
 
 module.exports = router;
