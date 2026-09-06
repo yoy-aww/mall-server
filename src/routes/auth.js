@@ -232,22 +232,86 @@ router.post('/users/reset-password/:id', requireAuth, requireAdmin, async (req, 
   ok(res, { message: '密码已重置' });
 });
 
-// DELETE /api/users/:id
+// DELETE /api/users/:id?mode=soft|hard
+// 默认软删除：用户敏感字段抹除，历史订单保留但变为"已删除用户"归属，
+// 避免孤儿订单，也保留审计线索。mode=hard 才真的 DELETE 全部相关数据。
 router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!existing) return fail(res, '用户不存在', 404);
   if (existing.role === 'admin') return fail(res, '不能删除管理员账号', 400);
   if (existing.id === req.user.id) return fail(res, '不能删除自己', 400);
+  if (existing.disabled) return fail(res, '用户已被软删除', 400);
+
+  const mode = req.query.mode === 'hard' ? 'hard' : 'soft';
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const userId = req.params.id;
+
+  if (mode === 'hard') {
+    // 硬删除：先处理子表，再删用户
+    const counts = {
+      orders: db.prepare('SELECT COUNT(*) as c FROM orders WHERE userId = ?').get(userId).c,
+      aftersales: db.prepare('SELECT COUNT(*) as c FROM aftersales WHERE userId = ?').get(userId).c,
+      reviews: db.prepare('SELECT COUNT(*) as c FROM reviews WHERE userId = ?').get(userId).c,
+      addresses: db.prepare('SELECT COUNT(*) as c FROM addresses WHERE userId = ?').get(userId).c,
+      notifications: db.prepare('SELECT COUNT(*) as c FROM notifications WHERE userId = ?').get(userId).c,
+    };
+    db.transaction(() => {
+      db.prepare('DELETE FROM aftersales WHERE userId = ?').run(userId);
+      db.prepare('DELETE FROM reviews WHERE userId = ?').run(userId);
+      db.prepare('DELETE FROM orders WHERE userId = ?').run(userId);
+      db.prepare('DELETE FROM addresses WHERE userId = ?').run(userId);
+      db.prepare('DELETE FROM notifications WHERE userId = ?').run(userId);
+      db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    })();
+    ok(res, { deleted: userId, mode, counts });
+    return;
+  }
+
+  // 软删除：抹除敏感字段，保留审计，处理子表归属
+  const counts = {
+    ordersAnonymized: db.prepare("SELECT COUNT(*) as c FROM orders WHERE userId = ?").get(userId).c,
+    reviewsAnonymized: db.prepare("SELECT COUNT(*) as c FROM reviews WHERE userId = ?").get(userId).c,
+    aftersalesAnonymized: db.prepare("SELECT COUNT(*) as c FROM aftersales WHERE userId = ?").get(userId).c,
+    addressesDeleted: db.prepare("SELECT COUNT(*) as c FROM addresses WHERE userId = ?").get(userId).c,
+    notificationsDeleted: db.prepare("SELECT COUNT(*) as c FROM notifications WHERE userId = ?").get(userId).c,
+  };
 
   db.transaction(() => {
-    db.prepare('DELETE FROM aftersales WHERE userId = ?').run(req.params.id);
-    db.prepare('DELETE FROM reviews WHERE userId = ?').run(req.params.id);
-    db.prepare('DELETE FROM addresses WHERE userId = ?').run(req.params.id);
-    db.prepare('DELETE FROM notifications WHERE userId = ?').run(req.params.id);
-    db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+    // 抹除敏感字段：清空昵称/头像/电话，密码设非法值
+    db.prepare(`UPDATE users SET
+        nickname = ?,
+        avatar = '',
+        phone = '',
+        password = ?,
+        disabled = 1,
+        updatedAt = ?
+      WHERE id = ?
+    `).run(`[deleted:${now}]`, '$2b$10$invalid00000000000000000000000000000000000000000000000000', now, userId);
+
+    // 订单：保留但标注归属已删除（不能 DELETE，售后/评价/历史查询会孤儿）
+    // 在 remark 末尾附加删除标记，方便管理员后台筛选
+    const orders = db.prepare("SELECT id, remark FROM orders WHERE userId = ?").all(userId);
+    const updOrder = db.prepare('UPDATE orders SET remark = ? WHERE id = ?');
+    for (const o of orders) {
+      updOrder.run(`[${o.remark || ''} | owner_deleted:${now}]`.trim(), o.id);
+    }
+
+    // 评价：保留但 username/nickname 抹除
+    db.prepare(`UPDATE reviews SET username = ?, nickname = ? WHERE userId = ?`)
+      .run('[deleted]', '[deleted]', userId);
+
+    // 售后：保留但关联用户已删除（status 为 pending 的自动拒）
+    db.prepare(`UPDATE aftersales SET status = ?, handleReason = ?, handledAt = ? WHERE userId = ? AND status = ?`)
+      .run('rejected', '用户已删除，售后申请自动关闭', now, userId, 'pending');
+
+    // 地址：删除（敏感信息）
+    db.prepare('DELETE FROM addresses WHERE userId = ?').run(userId);
+    // 通知：删除（临时信息）
+    db.prepare('DELETE FROM notifications WHERE userId = ?').run(userId);
   })();
-  ok(res, { deleted: req.params.id });
+
+  ok(res, { deleted: userId, mode: 'soft', counts });
 });
 
 module.exports = { router, requireAuth, requireAdmin };
