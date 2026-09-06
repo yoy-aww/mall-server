@@ -109,6 +109,35 @@ function generateSalt() {
   return crypto.randomBytes(16).toString('hex');
 }
 
+// ==================== SSE 一次性 ticket ====================
+// 用途：EventSource 不能带自定义 header，传统做法把 token 塞 query，会进 access log。
+// 解法：客户端先用长期 token POST /api/auth/sse-ticket 换一次性短 ticket（默认 60s），
+//        EventSource 只带这个短 ticket，被日志截获也无利用价值。
+const SSE_TICKET_TTL_MS = parseInt(process.env.SSE_TICKET_TTL_MS || 60 * 1000, 10);
+const sseTickets = new Map(); // ticket -> { userId, expires }
+
+function issueSseTicket(userId) {
+  const ticket = 'sse_' + crypto.randomBytes(16).toString('hex');
+  sseTickets.set(ticket, { userId, expires: Date.now() + SSE_TICKET_TTL_MS });
+  // 定期清理过期票据
+  if (!module.exports._sseTimer) {
+    module.exports._sseTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [k, v] of sseTickets) if (now > v.expires) sseTickets.delete(k);
+    }, 5 * 60 * 1000);
+    module.exports._sseTimer.unref();
+  }
+  return { ticket, ttlMs: SSE_TICKET_TTL_MS };
+}
+
+function verifySseTicket(ticket) {
+  if (!ticket || typeof ticket !== 'string') return null;
+  const rec = sseTickets.get(ticket);
+  if (!rec) return null;
+  if (Date.now() > rec.expires) { sseTickets.delete(ticket); return null; }
+  return rec.userId;
+}
+
 module.exports = {
   signToken,
   verifyToken,
@@ -116,7 +145,10 @@ module.exports = {
   verifyPassword,      // 兼容 API
   generateSalt,
   isLegacyHash,
+  issueSseTicket,
+  verifySseTicket,
   SECRET,
   TOKEN_TTL_MS,
   BCRYPT_ROUNDS,
+  SSE_TICKET_TTL_MS,
 };
