@@ -42,6 +42,8 @@ app.use('/api/products', productRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/stats', require('./routes/stats'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/rag', require('./routes/rag'));              // 商城问答浮窗代理（后端持租户 key）
+app.use('/api/rag-admin', require('./routes/rag-admin'));  // 管理后台租户管理代理（管理员登录）
 
 // 健康检查
 app.get('/api/health', (req, res) => {
