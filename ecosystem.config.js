@@ -6,8 +6,6 @@ module.exports = {
       NODE_ENV: 'production',
       PORT: 3000,
       HOST: '0.0.0.0',
-      // 图片 CDN：https://cdn.jsdelivr.net/gh/yoy-aww/mall-images/imgs/
-      // 不依赖七牛云，图片存在独立 GitHub 仓库 mall-images，由 jsDelivr CDN 加速。
     },
     // 日志配置
     log_date_format: 'YYYY-MM-DD HH:mm:ss',
