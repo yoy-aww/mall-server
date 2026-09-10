@@ -21,7 +21,9 @@ async function proxy(req, res, path) {
       body: ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    const data = await resp.json().catch(() => ({}));
+    const text = await resp.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
     res.status(resp.status).json(data);
   } catch (e) {
     res.status(502).json({ success: false, error: `RAG 服务不可达: ${e.message}` });
