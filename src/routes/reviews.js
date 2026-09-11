@@ -32,6 +32,40 @@ router.get('/', (req, res) => {
   ok(res, rows.map(rowToReview));
 });
 
+// GET /api/reviews/admin — 管理员：全部评价（支持分页+搜索）
+router.get('/admin', requireAuth, requireAdmin, (req, res) => {
+  const db = getDb();
+  const search = (req.query.search || '').trim();
+  const visible = req.query.visible !== undefined ? req.query.visible : undefined;
+  const productId = req.query.productId || undefined;
+
+  let where = '';
+  const params = [];
+  if (search) {
+    where += ' AND (r.content LIKE ? OR r.nickname LIKE ? OR r.username LIKE ? OR p.name LIKE ?)';
+    const s = `%${search}%`;
+    params.push(s, s, s, s);
+  }
+  if (productId) {
+    where += ' AND r.productId = ?';
+    params.push(productId);
+  }
+  if (visible !== undefined) {
+    where += ' AND r.visible = ?';
+    params.push(visible === '1' ? 1 : 0);
+  }
+  where = where ? 'WHERE' + where.slice(4) : '';
+
+  const total = db.prepare(`SELECT COUNT(*) as c FROM reviews r LEFT JOIN products p ON p.id = r.productId ${where}`).get(...params).c;
+  const limit = Math.min(parseInt(req.query.limit) || 20, 200);
+  const offset = parseInt(req.query.offset) || 0;
+  const rows = db.prepare(`
+    SELECT r.*, p.name as productName FROM reviews r LEFT JOIN products p ON p.id = r.productId
+    ${where} ORDER BY r.createdAt DESC LIMIT ? OFFSET ?
+  `).all(...params, limit, offset).map(rowToReview);
+  ok(res, { list: rows, pagination: { total, limit, offset, page: Math.floor(offset / limit) + 1, totalPages: Math.ceil(total / limit), hasMore: offset + limit < total } });
+});
+
 // GET /api/reviews/product/:productId/stats — 评价统计
 router.get('/product/:productId/stats', (req, res) => {
   const db = getDb();
