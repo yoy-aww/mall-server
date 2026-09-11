@@ -29,12 +29,12 @@ function resolveItemsFromDb(db, items) {
     const productId = item.productId;
     const qty = Math.max(1, parseInt(item.quantity, 10) || 1);
     if (!productId) throw new Error('productId 必填');
-    const product = db.prepare('SELECT id, name, discountedPrice, originalPrice, stock FROM products WHERE id = ?').get(productId);
+    const product = db.prepare('SELECT id, name, image, discountedPrice, originalPrice, stock FROM products WHERE id = ?').get(productId);
     if (!product) throw new Error(`${productId} 不存在`);
     if (product.stock < qty) throw new Error(`${product.name} 库存不足（剩 ${product.stock} 件）`);
     const price = product.discountedPrice || product.originalPrice;
     subtotal += price * qty;
-    resolved.push({ productId, productName: product.name, price, quantity: qty });
+    resolved.push({ productId, productName: product.name, productImage: product.image, price, quantity: qty });
   }
   return { resolved, subtotal };
 }
