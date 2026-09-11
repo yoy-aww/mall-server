@@ -50,21 +50,31 @@ nginx -v
 
 ### 4. 配置 Nginx 反向代理
 
-OpenCloudOS 的 Nginx 配置路径是 `/etc/nginx/conf.d/`（注意不是 Ubuntu 的 sites-available）。
+> 服务器实际使用**宝塔面板**管理 Nginx，vhost 配置在 `/www/server/panel/vhost/nginx/`
+> 下（不是 `/etc/nginx/conf.d/`）。两个站点端口：
+> - **8898** `mall-web.conf` → 前端商城（`root /var/www/mall-web`）
+> - **8899** `mall.conf`    → 管理后台（`root /var/www/mall-manage`）
+>
+> 这两个 vhost 的**版本控制基线**在 `mall-server/nginx/`（`mall-web.conf`、`mall.conf`），
+> 改完复制下面两处、`nginx -t && nginx -s reload` 即可。完整说明见 `nginx/README.md`。
 
-创建配置文件 `/etc/nginx/conf.d/mall.conf`：
+两个 server 块结构一致，以 8898 的 `mall-web.conf` 为例：
 
 ```nginx
 server {
-    listen 80;
+    listen 8898;
     server_name 43.153.148.187;
 
-    # 管理后台（静态文件）
-    root /var/www/mall-manage;
+    root /var/www/mall-web;
     index index.html;
 
     location / {
         try_files $uri $uri/ /index.html;
+    }
+
+    # 用户上传文件（评价图片等）—— 关键，缺了会空白
+    location /uploads/ {
+        proxy_pass http://127.0.0.1:3000;
     }
 
     # 后端 API 反向代理
@@ -74,25 +84,19 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
-
-    # 用户上传文件（评价图片等）
-    location /uploads/ {
-        alias /var/www/mall/mall-server/uploads/;
-    }
 }
 ```
+
+> ⚠️ `/uploads/` 必须代理到后端（或用 `alias` 指向 `mall-server/uploads/`）。
+> 前端拿到的图片 url 是相对路径 `/uploads/xxx.png`，若 nginx 不处理它，
+> 会命中 `try_files` 兜底返回 `index.html`，图片预览就显示空白。
 
 启用配置：
 
 ```bash
 nginx -t                  # 测试配置是否正确
-systemctl restart nginx
+nginx -s reload           # 或 systemctl reload nginx
 ```
-
-> ⚠️ OpenCloudOS 默认启用 SELinux，如果 Nginx 代理报 502，执行：
-> ```bash
-> setsebool -P httpd_can_network_connect 1
-> ```
 
 ### 5. 配置防火墙
 
