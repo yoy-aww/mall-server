@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 
 // 加载 .env 配置（在路由加载前，确保环境变量生效）
+const path = require('path');
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
 
 const { router: authRoutes } = require('./routes/auth');
@@ -40,6 +41,8 @@ app.use('/api/banners', bannerRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/upload', require('./routes/upload'));
+app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
 app.use('/api/stats', require('./routes/stats'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/rag', require('./routes/rag'));              // 商城问答浮窗代理（后端持租户 key）

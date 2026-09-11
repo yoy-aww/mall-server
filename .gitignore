@@ -8,3 +8,4 @@ mall.db-shm
 logs/
 server.log
 test.js
+uploads/
