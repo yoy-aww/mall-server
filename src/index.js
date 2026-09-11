@@ -7,7 +7,7 @@ const { initSchema, migrate } = require('./db/database');
 const { seed } = require('./db/seed');
 const { getDb } = require('./db/database');
 
-// 七牛 clouddn → jsDelivr CDN 迁移（幂等，无 clouddn 则跳过）
+// 图片 CDN URL 迁移：七牛云已下线，旧 clouddn URL → jsDelivr（幂等，无匹配则跳过）
 function migrateImageUrls() {
   const db = getDb();
   const OLD = 'tiyycecb8.hn-bkt.clouddn.com';
