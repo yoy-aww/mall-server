@@ -51,8 +51,8 @@ function migrateImageUrls() {
   }
 }
 
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const PORT = process.env.PORT || 3456;
+const HOST = process.env.HOST || '127.0.0.1';
 
 // 初始化数据库
 initSchema();
